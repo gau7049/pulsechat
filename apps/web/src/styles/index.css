@@ -1,0 +1,107 @@
+@import 'tailwindcss';
+
+/* Dark mode is class-driven (ThemeProvider stamps `.dark` on <html>) so the
+   user's saved preference wins over the OS default. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── Design tokens (Build Instructions §7: one token layer, no scattered hex) ─
+   Semantic variables are defined per theme below, then exposed to Tailwind as
+   `bg-surface`, `text-fg-muted`, `bg-accent`, … via @theme inline. */
+@theme inline {
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-border: var(--border);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+}
+
+/* Light theme (default) */
+:root {
+  --surface: oklch(0.985 0.002 250);
+  --surface-raised: oklch(1 0 0);
+  --surface-sunken: oklch(0.955 0.004 250);
+  --border: oklch(0.9 0.008 250);
+  --fg: oklch(0.22 0.02 255);
+  --fg-muted: oklch(0.5 0.02 255);
+  --danger: oklch(0.55 0.2 25);
+  --success: oklch(0.55 0.15 155);
+  --warning: oklch(0.65 0.15 75);
+  --on-accent: oklch(0.99 0 0);
+  color-scheme: light;
+}
+
+/* Dark theme — fully restyled, not background-swapped (Build Instructions §7) */
+.dark {
+  --surface: oklch(0.19 0.015 255);
+  --surface-raised: oklch(0.24 0.015 255);
+  --surface-sunken: oklch(0.15 0.015 255);
+  --border: oklch(0.32 0.015 255);
+  --fg: oklch(0.93 0.005 250);
+  --fg-muted: oklch(0.68 0.01 250);
+  --danger: oklch(0.68 0.19 25);
+  --success: oklch(0.72 0.14 155);
+  --warning: oklch(0.78 0.14 80);
+  --on-accent: oklch(0.99 0 0);
+  color-scheme: dark;
+}
+
+/* Accent palettes (Requirement Scope §14.9: genuinely themeable accent).
+   ThemeProvider stamps data-accent on <html>; AA contrast holds in both modes. */
+:root,
+[data-accent='pulse'] {
+  --accent-hue: 265;
+}
+[data-accent='ocean'] {
+  --accent-hue: 240;
+}
+[data-accent='forest'] {
+  --accent-hue: 155;
+}
+[data-accent='sunset'] {
+  --accent-hue: 35;
+}
+[data-accent='rose'] {
+  --accent-hue: 355;
+}
+
+:root {
+  --accent: oklch(0.54 0.19 var(--accent-hue));
+  --accent-strong: oklch(0.47 0.21 var(--accent-hue));
+  --accent-soft: oklch(0.94 0.04 var(--accent-hue));
+}
+.dark {
+  --accent: oklch(0.72 0.16 var(--accent-hue));
+  --accent-strong: oklch(0.78 0.14 var(--accent-hue));
+  --accent-soft: oklch(0.3 0.06 var(--accent-hue));
+  --on-accent: oklch(0.18 0.02 var(--accent-hue));
+}
+
+/* ── Base ── */
+body {
+  @apply bg-surface text-fg antialiased;
+}
+
+/* Visible focus for keyboard users, everywhere (Build Instructions §7). */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Respect prefers-reduced-motion globally. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
