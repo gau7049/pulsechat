@@ -89,6 +89,10 @@ export const messageSendSchema = z.object({
   clientUuid: z.string().uuid(),
   ciphertext: base64(LIMITS.MESSAGE_CIPHERTEXT_MAX_CHARS),
   nonce: base64(64),
+  /** §14.5 reply-to — must reference a message in the same conversation. */
+  replyToId: z.string().uuid().optional(),
+  /** §14.5 forward — a message the sender can read; marks the copy "Forwarded". */
+  forwardedFromId: z.string().uuid().optional(),
 });
 export type MessageSendPayload = z.infer<typeof messageSendSchema>;
 
@@ -141,9 +145,14 @@ export interface MessageDto {
   sequence: number;
   clientUuid: string;
   replyToId: string | null;
+  forwardedFromId: string | null;
   editedAt: string | null;
   deletedForEveryoneAt: string | null;
   createdAt: string;
+  /** Everyone's reactions (§14.4); one per user by schema. */
+  reactions: Array<{ userId: string; emoji: string }>;
+  /** Whether the viewer starred it (§14.6) — private, per viewer. */
+  starred: boolean;
   /** Only on the sender's own messages; respects read-receipt opt-outs. */
   aggregateState?: MessageAggregateState;
 }
@@ -167,6 +176,10 @@ export interface ConversationDto {
   myWrappedKey: string;
   lastMessage: MessageDto | null;
   unreadCount: number;
+  /** §14.11 per-member management flags. */
+  pinned: boolean;
+  muted: boolean;
+  archived: boolean;
 }
 
 /** GET /messages/:id/statuses — the §14.2 per-member breakdown, sender only. */

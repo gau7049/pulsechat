@@ -70,6 +70,7 @@ model User {
   messageStatuses     MessageStatus[]
   reactions           MessageReaction[]
   stars               MessageStar[]
+  messageHides        MessageHide[]
   statuses            Status[]
   liveSessions        LiveSession[]
   posts               Post[]
@@ -296,6 +297,7 @@ model Message {
   statuses      MessageStatus[]
   reactions     MessageReaction[]
   stars         MessageStar[]
+  hides         MessageHide[]
 
   @@unique([conversationId, sequence])
   @@unique([conversationId, clientUuid])
@@ -335,6 +337,21 @@ model MessageReaction {
 
   @@id([messageId, userId])
   @@map("message_reactions")
+}
+
+/// "Delete for me" (§14.3): hides one message from one user without touching
+/// anyone else's view. Deleting for everyone lives on the Message row itself.
+model MessageHide {
+  messageId String   @map("message_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([userId])
+  @@map("message_hides")
 }
 
 /// Star has no emoji column, just presence (Technical Spec §4); private to the

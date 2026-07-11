@@ -37,13 +37,7 @@ export interface SignedUpload {
  * API secret.
  */
 export function signUpload(userId: string, purpose: 'avatar'): SignedUpload {
-  const config = parseCloudinaryUrl();
-  if (!config) {
-    throw new AppError(
-      'VALIDATION_FAILED',
-      'Media uploads are not configured yet (CLOUDINARY_URL missing)',
-    );
-  }
+  const config = requireConfig();
   const timestamp = Math.floor(Date.now() / 1000);
   const folder = `pulsechat/${purpose}`;
   const publicId = `${purpose}_${userId}`;
@@ -61,4 +55,46 @@ export function signUpload(userId: string, purpose: 'avatar'): SignedUpload {
     signature,
     uploadUrl: `https://api.cloudinary.com/v1_1/${config.cloudName}/image/upload`,
   };
+}
+
+/** Chat attachment kinds map to Cloudinary resource types (Tech Spec §10). */
+export type AttachmentResourceType = 'image' | 'video' | 'raw';
+
+/**
+ * Attachment uploads (§14.8): unique public id per upload, resource type
+ * chosen by the picker (video also covers audio; raw covers documents).
+ */
+export function signAttachmentUpload(
+  userId: string,
+  resourceType: AttachmentResourceType,
+): SignedUpload {
+  const config = requireConfig();
+  const timestamp = Math.floor(Date.now() / 1000);
+  const folder = `pulsechat/attachments/${userId}`;
+  const publicId = `att_${timestamp}_${Math.random().toString(36).slice(2, 10)}`;
+  const paramsToSign = `folder=${folder}&public_id=${publicId}&timestamp=${timestamp}`;
+  const signature = createHash('sha1')
+    .update(paramsToSign + config.apiSecret)
+    .digest('hex');
+
+  return {
+    cloudName: config.cloudName,
+    apiKey: config.apiKey,
+    timestamp,
+    folder,
+    publicId,
+    signature,
+    uploadUrl: `https://api.cloudinary.com/v1_1/${config.cloudName}/${resourceType}/upload`,
+  };
+}
+
+function requireConfig(): CloudinaryConfig {
+  const config = parseCloudinaryUrl();
+  if (!config) {
+    throw new AppError(
+      'VALIDATION_FAILED',
+      'Media uploads are not configured yet (CLOUDINARY_URL missing)',
+    );
+  }
+  return config;
 }

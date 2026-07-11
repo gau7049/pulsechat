@@ -2,7 +2,10 @@ import type {
   Conversation,
   ConversationMember,
   Message,
+  MessageReaction,
+  MessageStar,
   MessageStatus,
+  Prisma,
   PrivacySetting,
   User,
 } from '@prisma/client';
@@ -121,6 +124,25 @@ export async function removeMember(conversationId: string, userId: string): Prom
 
 // ── Messages ─────────────────────────────────────────────────────────────────
 
+/** A message plus per-viewer metadata: everyone's reactions, the viewer's star. */
+export type MessageWithMeta = Message & {
+  reactions: MessageReaction[];
+  stars: MessageStar[];
+};
+
+const metaInclude = (viewerId: string) => ({
+  reactions: true,
+  stars: { where: { userId: viewerId } },
+});
+
+/** Per-viewer visibility (§14.3): hides + the "clear chat" horizon. */
+function visibleTo(viewerId: string, clearedAt: Date | null): Prisma.MessageWhereInput {
+  return {
+    hides: { none: { userId: viewerId } },
+    ...(clearedAt ? { createdAt: { gt: clearedAt } } : {}),
+  };
+}
+
 export function maxSequence(conversationId: string): Promise<number> {
   return prisma.message
     .aggregate({ where: { conversationId }, _max: { sequence: true } })
@@ -134,6 +156,8 @@ export function createMessage(input: {
   nonce: string;
   sequence: number;
   clientUuid: string;
+  replyToId?: string;
+  forwardedFromId?: string;
 }): Promise<Message> {
   return prisma.message.create({ data: input });
 }
@@ -151,16 +175,19 @@ export function findByClientUuid(
   });
 }
 
-/** One history page, newest first, strictly below the cursor sequence. */
+/** One history page for a viewer, newest first, below the cursor sequence. */
 export function listMessages(
   conversationId: string,
-  options: { beforeSequence?: number; limit: number },
-): Promise<Message[]> {
+  viewerId: string,
+  options: { beforeSequence?: number; limit: number; clearedAt?: Date | null },
+): Promise<MessageWithMeta[]> {
   return prisma.message.findMany({
     where: {
       conversationId,
       ...(options.beforeSequence !== undefined ? { sequence: { lt: options.beforeSequence } } : {}),
+      ...visibleTo(viewerId, options.clearedAt ?? null),
     },
+    include: metaInclude(viewerId),
     orderBy: { sequence: 'desc' },
     take: options.limit,
   });
@@ -169,11 +196,17 @@ export function listMessages(
 /** Gap replay: everything after the client's last known sequence (§21.2). */
 export function listMessagesAfter(
   conversationId: string,
+  viewerId: string,
   afterSequence: number,
   cap: number,
-): Promise<Message[]> {
+): Promise<MessageWithMeta[]> {
   return prisma.message.findMany({
-    where: { conversationId, sequence: { gt: afterSequence } },
+    where: {
+      conversationId,
+      sequence: { gt: afterSequence },
+      ...visibleTo(viewerId, null),
+    },
+    include: metaInclude(viewerId),
     orderBy: { sequence: 'asc' },
     take: cap,
   });
@@ -189,9 +222,115 @@ export function countUnread(
     where: {
       conversationId,
       senderId: { not: userId },
-      ...(clearedAt ? { createdAt: { gt: clearedAt } } : {}),
       statuses: { none: { userId, state: 'read' } },
+      ...visibleTo(userId, clearedAt),
     },
+  });
+}
+
+// ── Message actions (§14.3–14.6) ─────────────────────────────────────────────
+
+/** Edit: replace ciphertext in place and stamp editedAt (§14.3). */
+export function updateMessageContent(
+  id: string,
+  content: { ciphertext: string; nonce: string },
+): Promise<Message> {
+  return prisma.message.update({
+    where: { id },
+    data: { ...content, editedAt: new Date() },
+  });
+}
+
+/** Delete for everyone: tombstone the row and drop the ciphertext (§14.3). */
+export function tombstoneMessage(id: string): Promise<Message> {
+  return prisma.message.update({
+    where: { id },
+    data: { deletedForEveryoneAt: new Date(), ciphertext: '', nonce: '' },
+  });
+}
+
+/** Delete for me: per-viewer hide row; idempotent (§14.3). */
+export async function hideMessage(messageId: string, userId: string): Promise<void> {
+  await prisma.messageHide.createMany({
+    data: [{ messageId, userId }],
+    skipDuplicates: true,
+  });
+}
+
+/** Toggle semantics (§14.4): same emoji removes, different emoji replaces. */
+export async function toggleReaction(
+  messageId: string,
+  userId: string,
+  emoji: string,
+): Promise<string | null> {
+  const existing = await prisma.messageReaction.findUnique({
+    where: { messageId_userId: { messageId, userId } },
+  });
+  if (existing?.emoji === emoji) {
+    await prisma.messageReaction.delete({ where: { messageId_userId: { messageId, userId } } });
+    return null;
+  }
+  await prisma.messageReaction.upsert({
+    where: { messageId_userId: { messageId, userId } },
+    create: { messageId, userId, emoji },
+    update: { emoji },
+  });
+  return emoji;
+}
+
+/** Star toggle (§14.6); returns the new state. */
+export async function toggleStar(messageId: string, userId: string): Promise<boolean> {
+  const existing = await prisma.messageStar.findUnique({
+    where: { messageId_userId: { messageId, userId } },
+  });
+  if (existing) {
+    await prisma.messageStar.delete({ where: { messageId_userId: { messageId, userId } } });
+    return false;
+  }
+  await prisma.messageStar.create({ data: { messageId, userId } });
+  return true;
+}
+
+export type StarWithMessage = MessageStar & {
+  message: MessageWithMeta & {
+    conversation: Conversation & { members: MemberWithUser[] };
+  };
+};
+
+/** The viewer's starred messages, newest star first (§14.6). */
+export function listStarred(
+  userId: string,
+  options: { cursorMessageId?: string; limit: number },
+): Promise<StarWithMessage[]> {
+  return prisma.messageStar.findMany({
+    where: { userId, message: { hides: { none: { userId } } } },
+    include: {
+      message: {
+        include: {
+          ...metaInclude(userId),
+          conversation: {
+            include: { members: { include: { user: { include: { privacy: true } } } } },
+          },
+        },
+      },
+    },
+    orderBy: [{ createdAt: 'desc' }, { messageId: 'asc' }],
+    take: options.limit,
+    ...(options.cursorMessageId
+      ? { cursor: { messageId_userId: { messageId: options.cursorMessageId, userId } }, skip: 1 }
+      : {}),
+  });
+}
+
+/** §14.11 pin/mute/archive — flags live on the member row. */
+export function updateMemberSettings(
+  conversationId: string,
+  userId: string,
+  settings: { pinned?: boolean; muted?: boolean; archived?: boolean },
+): Promise<ConversationMember> {
+  return prisma.conversationMember.update({
+    where: { conversationId_userId: { conversationId, userId } },
+    data: settings,
   });
 }
 

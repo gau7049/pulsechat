@@ -20,6 +20,8 @@ export const SERVER_EVENTS = {
   MESSAGE_NEW: 'message:new',
   MESSAGE_EDITED: 'message:edited',
   MESSAGE_DELETED: 'message:deleted',
+  /** A reaction was added, replaced, or removed (§14.4). */
+  MESSAGE_REACTION: 'message:reaction',
   MESSAGE_STATUS: 'message:status',
   /** Relays a member's typing:start/stop to the rest of the conversation. */
   TYPING_UPDATE: 'typing:update',

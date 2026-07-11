@@ -11,12 +11,17 @@ import {
   type MessageStatusDto,
   type MessageStatusEventPayload,
   type Page,
+  type StarredMessageDto,
 } from '@pulsechat/shared';
 import { getIo } from '../lib/io.js';
 import { logger } from '../lib/logger.js';
 import { AppError } from '../http/errors.js';
 import * as chat from '../repositories/chat.repository.js';
-import type { ConversationWithMembers, MemberWithUser } from '../repositories/chat.repository.js';
+import type {
+  ConversationWithMembers,
+  MemberWithUser,
+  MessageWithMeta,
+} from '../repositories/chat.repository.js';
 import * as social from '../repositories/social.repository.js';
 import { isOnline, lastSeenFor, visiblePresence } from './presence.service.js';
 import { toUserSummaryDto } from './user-summary.serializer.js';
@@ -32,7 +37,12 @@ const SYNC_CAP_PER_CONVERSATION = 200;
 
 // ── Serialization ────────────────────────────────────────────────────────────
 
-export function toMessageDto(message: Message, aggregateState?: MessageAggregateState): MessageDto {
+/** Meta defaults cover paths where a message is brand new (no reactions yet). */
+export function toMessageDto(
+  message: Message | MessageWithMeta,
+  aggregateState?: MessageAggregateState,
+): MessageDto {
+  const withMeta = message as Partial<MessageWithMeta>;
   return {
     id: message.id,
     conversationId: message.conversationId,
@@ -42,9 +52,12 @@ export function toMessageDto(message: Message, aggregateState?: MessageAggregate
     sequence: message.sequence,
     clientUuid: message.clientUuid,
     replyToId: message.replyToId,
+    forwardedFromId: message.forwardedFromId,
     editedAt: message.editedAt?.toISOString() ?? null,
     deletedForEveryoneAt: message.deletedForEveryoneAt?.toISOString() ?? null,
     createdAt: message.createdAt.toISOString(),
+    reactions: (withMeta.reactions ?? []).map((r) => ({ userId: r.userId, emoji: r.emoji })),
+    starred: (withMeta.stars ?? []).length > 0,
     ...(aggregateState ? { aggregateState } : {}),
   };
 }
@@ -90,6 +103,9 @@ async function toConversationDto(
     myWrappedKey: me.wrappedKey,
     lastMessage: lastMessage ? toMessageDto(lastMessage) : null,
     unreadCount: await chat.countUnread(conversation.id, viewerId, me.clearedAt),
+    pinned: me.pinned,
+    muted: me.muted,
+    archived: me.archived,
   };
 }
 
@@ -161,7 +177,14 @@ export async function createConversation(
   if (body.type === 'direct') {
     const existing = await chat.findDirectBetween(creatorId, memberIds[0]!);
     if (existing) {
-      const lastMessage = (await chat.listMessages(existing.id, { limit: 1 }))[0] ?? null;
+      const me = existing.members.find((m) => m.userId === creatorId);
+      const lastMessage =
+        (
+          await chat.listMessages(existing.id, creatorId, {
+            limit: 1,
+            clearedAt: me?.clearedAt ?? null,
+          })
+        )[0] ?? null;
       return {
         conversation: await toConversationDto(creatorId, existing, lastMessage),
         existing: true,
@@ -274,9 +297,10 @@ export async function getMessages(
   if (query.cursor && !Number.isFinite(beforeSequence)) {
     throw new AppError('VALIDATION_FAILED', 'Invalid cursor');
   }
-  const rows = await chat.listMessages(conversationId, {
+  const rows = await chat.listMessages(conversationId, viewerId, {
     beforeSequence,
     limit: query.limit + 1,
+    clearedAt: me.clearedAt,
   });
   const pageRows = rows.slice(0, query.limit);
 
@@ -375,6 +399,22 @@ export async function sendMessage(
   const existing = await chat.findByClientUuid(payload.conversationId, payload.clientUuid);
   if (existing) return toMessageDto(existing, 'sent');
 
+  // §14.5 reply-to: the referenced message must live in this conversation.
+  if (payload.replyToId) {
+    const original = await chat.findMessageById(payload.replyToId);
+    if (!original || original.conversationId !== payload.conversationId) {
+      throw new AppError('VALIDATION_FAILED', 'Reply target is not in this conversation');
+    }
+  }
+  // §14.5 forward: the source must be a message the sender can actually read.
+  if (payload.forwardedFromId) {
+    const source = await chat.findMessageById(payload.forwardedFromId);
+    const membership = source ? await chat.getMembership(source.conversationId, senderId) : null;
+    if (!source || !membership) {
+      throw new AppError('VALIDATION_FAILED', 'Forward source is not available to you');
+    }
+  }
+
   let message: Message | null = null;
   for (let attempt = 0; attempt < SEQUENCE_RETRIES && !message; attempt += 1) {
     const sequence = (await chat.maxSequence(payload.conversationId)) + 1;
@@ -386,6 +426,8 @@ export async function sendMessage(
         nonce: payload.nonce,
         sequence,
         clientUuid: payload.clientUuid,
+        replyToId: payload.replyToId,
+        forwardedFromId: payload.forwardedFromId,
       });
     } catch (error) {
       if (isUniqueViolation(error, 'client_uuid')) {
@@ -467,6 +509,7 @@ export async function syncMessages(
     if (!membership) continue;
     const missed = await chat.listMessagesAfter(
       conversationId,
+      userId,
       lastSequence,
       SYNC_CAP_PER_CONVERSATION,
     );
@@ -476,4 +519,138 @@ export async function syncMessages(
     await ackMessages(userId, { conversationId, upToSequence: top, state: 'delivered' });
   }
   return out;
+}
+
+// ── Message actions (§14.3–14.6) ─────────────────────────────────────────────
+
+/** Loads a message and asserts the caller is in its conversation. */
+async function requireReadable(
+  userId: string,
+  messageId: string,
+): Promise<{ message: Message; conversation: ConversationWithMembers }> {
+  const message = await chat.findMessageById(messageId);
+  const conversation = message ? await chat.getConversation(message.conversationId) : null;
+  const membership = conversation?.members.find((m) => m.userId === userId);
+  if (!message || !conversation || !membership) {
+    throw new AppError('NOT_FOUND', 'Message not found');
+  }
+  return { message, conversation };
+}
+
+function fanOut(conversation: ConversationWithMembers, event: string, payload: unknown): void {
+  const io = getIo();
+  for (const member of conversation.members) {
+    io?.to(`user:${member.userId}`).emit(event, payload);
+  }
+}
+
+/** §14.3 edit — sender only, not on deleted messages, live to everyone. */
+export async function editMessage(
+  userId: string,
+  messageId: string,
+  content: { ciphertext: string; nonce: string },
+): Promise<MessageDto> {
+  const { message, conversation } = await requireReadable(userId, messageId);
+  if (message.senderId !== userId) {
+    throw new AppError('FORBIDDEN', 'Only the sender can edit a message');
+  }
+  if (message.deletedForEveryoneAt) {
+    throw new AppError('CONFLICT', 'This message was deleted');
+  }
+  const updated = await chat.updateMessageContent(messageId, content);
+  const dto = toMessageDto(updated);
+  fanOut(conversation, SERVER_EVENTS.MESSAGE_EDITED, dto);
+  logger.info({ event: 'chat.message_edited', messageId, userId }, 'message edited');
+  return dto;
+}
+
+/** §14.3 delete — "me" hides locally, "everyone" tombstones (sender only). */
+export async function deleteMessage(
+  userId: string,
+  messageId: string,
+  scope: 'me' | 'everyone',
+): Promise<void> {
+  const { message, conversation } = await requireReadable(userId, messageId);
+  if (scope === 'me') {
+    await chat.hideMessage(messageId, userId);
+    return;
+  }
+  if (message.senderId !== userId) {
+    throw new AppError('FORBIDDEN', 'Only the sender can delete for everyone');
+  }
+  if (!message.deletedForEveryoneAt) {
+    await chat.tombstoneMessage(messageId);
+    fanOut(conversation, SERVER_EVENTS.MESSAGE_DELETED, {
+      conversationId: conversation.id,
+      messageId,
+    });
+  }
+  logger.info({ event: 'chat.message_deleted', messageId, userId, scope }, 'message deleted');
+}
+
+/** §14.4 reaction toggle; the resulting state is broadcast to members. */
+export async function reactToMessage(
+  userId: string,
+  messageId: string,
+  emoji: string,
+): Promise<{ emoji: string | null }> {
+  const { message, conversation } = await requireReadable(userId, messageId);
+  if (message.deletedForEveryoneAt) {
+    throw new AppError('CONFLICT', 'This message was deleted');
+  }
+  const result = await chat.toggleReaction(messageId, userId, emoji);
+  fanOut(conversation, SERVER_EVENTS.MESSAGE_REACTION, {
+    conversationId: conversation.id,
+    messageId,
+    userId,
+    emoji: result,
+  });
+  return { emoji: result };
+}
+
+/** §14.6 star toggle — private to the caller, no broadcast. */
+export async function starMessage(
+  userId: string,
+  messageId: string,
+): Promise<{ starred: boolean }> {
+  await requireReadable(userId, messageId);
+  return { starred: await chat.toggleStar(messageId, userId) };
+}
+
+/** §14.6 starred view, each entry labelled with its conversation context. */
+export async function listStarredMessages(
+  userId: string,
+  pagination: { cursor?: string; limit: number },
+): Promise<Page<StarredMessageDto>> {
+  const rows = await chat.listStarred(userId, {
+    cursorMessageId: pagination.cursor,
+    limit: pagination.limit + 1,
+  });
+  const pageRows = rows.slice(0, pagination.limit);
+  return {
+    items: pageRows.map((star) => {
+      const conversation = star.message.conversation;
+      const other = conversation.members.find((m) => m.userId !== userId);
+      return {
+        message: toMessageDto(star.message),
+        starredAt: star.createdAt.toISOString(),
+        conversationLabel:
+          conversation.type === 'group'
+            ? (conversation.name ?? 'Group')
+            : (other?.user.displayName ?? 'Conversation'),
+      };
+    }),
+    ...(rows.length > pagination.limit ? { nextCursor: pageRows.at(-1)!.messageId } : {}),
+  };
+}
+
+/** §14.11 pin/mute/archive — per-member flags, no one else affected. */
+export async function updateConversationSettings(
+  userId: string,
+  conversationId: string,
+  settings: { pinned?: boolean; muted?: boolean; archived?: boolean },
+): Promise<void> {
+  const membership = await chat.getMembership(conversationId, userId);
+  if (!membership) throw new AppError('NOT_FOUND', 'Conversation not found');
+  await chat.updateMemberSettings(conversationId, userId, settings);
 }
