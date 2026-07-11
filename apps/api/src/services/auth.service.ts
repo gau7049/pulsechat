@@ -29,7 +29,6 @@ const VERIFY_EMAIL_TTL_MS = 24 * 60 * 60 * 1000;
 const MAGIC_LINK_TTL_MS = 15 * 60 * 1000;
 const OTP_TTL_MS = 10 * 60 * 1000;
 const DEVICE_CONFIRM_TTL_MS = 30 * 60 * 1000;
-const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
 
 export interface RequestContext {
