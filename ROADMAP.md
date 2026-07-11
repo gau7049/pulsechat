@@ -85,16 +85,42 @@ Frontend:
 - `RelationshipButton` drives every action from the server's relationship enum; TanStack Query
   mutations invalidate the whole `['social']` family (socket invalidation lands in M3)
 
-### ⬜ M3 — Messaging core (NEXT)
+### ✅ M3 — Messaging core (DONE — awaiting user browser review)
 
-- Conversation create (friendship-gated); per-conversation AES-256-GCM content key generated
-  client-side, wrapped per member → `ConversationMember.wrapped_key`
-- `message:send` (client_uuid + ciphertext → persist, assign sequence, fan out), `message:ack`
-  → MessageStatus; sent/delivered/read; mutual read-receipt opt-out; unread counts
-- Cursor-paginated history; reconnect gap-replay (client sends last sequence); offline queue with
-  pending/failed/retry UI; group chats + per-member delivery breakdown; typing; presence/last-seen
+Backend (10 tests in `apps/api/src/http/chat.integration.test.ts` over real Socket.IO;
+63 API tests total):
 
-### ⬜ M4 — Messaging polish
+- Conversations: friendship-gated create (§15, blocks honoured), direct dedupe (either side →
+  same room, 200 vs 201), groups w/ name + admin role; add member (admin-only) / leave; members
+  carry per-viewer presence (§8 last-seen visibility; last-seen = max `Device.lastSeenAt`,
+  refreshed by `presence:heartbeat`; live state in-process in `presence.service.ts`)
+- Messages: `message:send` (ack callback returns persisted DTO) — sequence = max+1 with unique
+  `(conversation_id, sequence)` retry, `client_uuid` idempotency; fan-out to `user:{id}` rooms;
+  recipients with live sockets get MessageStatus `notified`, others stay unreached (§14.2)
+- `message:ack {conversationId, upToSequence, state}` — cumulative, monotonic (read never
+  downgrades); `message:status` re-broadcast applies the **mutual** read-receipt opt-out per
+  receiving member (DB keeps the truth for unread counts; presentation degrades read→delivered)
+- `message:sync` gap replay on reconnect (§21.2) — returns everything past the client's last
+  sequence per conversation and marks it delivered; typing relay; §10.2 block locks direct convos
+- REST: `GET /conversations` (members, myWrappedKey, lastMessage, unreadCount), cursor history
+  by sequence, `GET /messages/:id/statuses` (§14.2 breakdown, sender-only)
+
+Frontend:
+
+- Crypto (Tech Spec §6): AES-256-GCM bodies via WebCrypto; content key sealed per member with
+  libsodium `crypto_box_seal`; unlocked private key cached in IndexedDB for the session
+  (cleared on logout) so silent restore still decrypts; password-unlock panel (magic-link
+  logins); explicit "no keys on this device" state — key portability is the documented §6 limit
+- `/chats`: two-pane (list + window), unread badges incl. nav total, decrypted last-message
+  previews, presence dot / last-seen, typing line, new-chat modal (direct or group; wraps the
+  key for every member's publicKey — members without keys are not selectable)
+- Window: upward infinite scroll (anchored viewport), read acks while visible, live ticks
+  pending → sent ✓ → delivered ✓✓ → read (accent) upgraded via `message:status` watermarks
+  (`chat-live-store.ts`), failed + retry, group per-member breakdown modal
+- Offline outbox (§21.2): encrypted entries persisted in localStorage, flushed on reconnect,
+  then `message:sync` patches React Query caches in place (`use-chat.ts` socket bridge)
+
+### ⬜ M4 — Messaging polish (NEXT)
 
 - Edit/delete (for me / for everyone) live; reactions; GIFs/stickers; big single emoji
 - Reply-to with scroll-to-original; forward (friends-only picker); starred messages view
@@ -161,3 +187,10 @@ Frontend:
   change needed — M0 schema already covered M2. User dropped markdown versions of both specs into
   the repo root (left untracked; commit if wanted). All gates green. Pending: user browser review
   of M2, then M3.
+- **2026-07-12 (later)** — M3 built on user go-ahead (M2 browser review still pending): messaging
+  core end to end — socket send/ack/sync with strict ordering + idempotency, E2E envelope
+  encryption client-side, presence/typing, offline outbox, full `/chats` UI. 10 new API tests
+  (real socket round-trips) → 63 total; no schema change needed. Design note: account keypair is
+  device-bound (spec §6) — new devices show a "no keys here" state; session cache of the unlocked
+  key lives in IndexedDB, cleared on logout. Pending: user browser walkthrough of M2+M3 (two
+  browsers/accounts for live chat), then M4.
