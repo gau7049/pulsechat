@@ -2,6 +2,7 @@
   "name": "pulsechat",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "PulseChat — real-time chat & social web application (portfolio build, free-tier-only stack)",
   "engines": {
     "node": ">=22"
@@ -35,5 +36,8 @@
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3"
   }
 }
