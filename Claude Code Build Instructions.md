@@ -2,7 +2,7 @@
 
 Handoff brief · Version 1.0 · July 11, 2026 · Governs implementation against Requirement Scope v0.3 and Technical Specification v0.1
 
-> **Read this first, in order:** (1) *Web App Requirement Scope* — the product spec, what the app must do and why. (2) *Technical Specification* — the chosen stack, data model, API/socket contracts, and build sequence. (3) This document — how to execute that build: what you (Claude Code) own end-to-end, what the human must do outside the codebase, and the engineering bar every line of code is held to. Do not start writing code before both reference documents have been read in full and a folder structure has been planned against Technical Specification Section 3.
+> **Read this first, in order:** (1) _Web App Requirement Scope_ — the product spec, what the app must do and why. (2) _Technical Specification_ — the chosen stack, data model, API/socket contracts, and build sequence. (3) This document — how to execute that build: what you (Claude Code) own end-to-end, what the human must do outside the codebase, and the engineering bar every line of code is held to. Do not start writing code before both reference documents have been read in full and a folder structure has been planned against Technical Specification Section 3.
 
 ## 1. What This Project Is
 
@@ -12,24 +12,24 @@ A real-time chat-and-social web application: one-to-one and group messaging with
 
 Every part of this build runs on a permanently free tier — no trials, no paid upgrades at any point. This is the complete list; do not introduce a service outside it without checking it's genuinely free forever.
 
-| Purpose | Service |
-|---|---|
-| Database + file storage | Supabase |
-| Media CDN / transforms | Cloudinary |
-| Transactional email (verification, magic link, OTP, new-device confirm) | Brevo |
-| CAPTCHA | Cloudflare Turnstile |
-| Push notifications | Web Push API (VAPID) — no FCM/APNs |
-| Call/live signaling | Socket.IO (existing realtime layer) |
-| STUN | Google public STUN |
-| TURN | Self-hosted coturn on an Oracle Cloud Always-Free VM |
-| Frontend hosting | Vercel |
-| API/socket hosting | Render |
-| CI/CD | GitHub Actions |
-| Uptime monitoring | UptimeRobot |
-| Analytics | Self-hosted event table + Recharts (no BI tool) |
-| DB backups | GitHub Actions cron → Backblaze B2 |
-| Status music | CC0 tracks (Free Music Archive), bundled as static assets |
-| Profanity/spam filter | Open-source wordlist (no paid moderation API) |
+| Purpose                                                                 | Service                                                   |
+| ----------------------------------------------------------------------- | --------------------------------------------------------- |
+| Database + file storage                                                 | Supabase                                                  |
+| Media CDN / transforms                                                  | Cloudinary                                                |
+| Transactional email (verification, magic link, OTP, new-device confirm) | Brevo                                                     |
+| CAPTCHA                                                                 | Cloudflare Turnstile                                      |
+| Push notifications                                                      | Web Push API (VAPID) — no FCM/APNs                        |
+| Call/live signaling                                                     | Socket.IO (existing realtime layer)                       |
+| STUN                                                                    | Google public STUN                                        |
+| TURN                                                                    | Self-hosted coturn on an Oracle Cloud Always-Free VM      |
+| Frontend hosting                                                        | Vercel                                                    |
+| API/socket hosting                                                      | Render                                                    |
+| CI/CD                                                                   | GitHub Actions                                            |
+| Uptime monitoring                                                       | UptimeRobot                                               |
+| Analytics                                                               | Self-hosted event table + Recharts (no BI tool)           |
+| DB backups                                                              | GitHub Actions cron → Backblaze B2                        |
+| Status music                                                            | CC0 tracks (Free Music Archive), bundled as static assets |
+| Profanity/spam filter                                                   | Open-source wordlist (no paid moderation API)             |
 
 ## 3. What Claude Code Owns, End to End
 
@@ -47,18 +47,18 @@ Follow the milestone order M0–M8 in Technical Specification Section 18 unless 
 
 Claude Code cannot create accounts, click through provider consoles, or hold real secrets. The human owner completes these before or during the build; Claude Code should flag exactly which variables/config it is waiting on.
 
-| Task | Why it's manual |
-|---|---|
-| Create free accounts: Supabase, Cloudinary, Brevo, Cloudflare (Turnstile), Vercel, Render, GitHub, Backblaze B2, UptimeRobot, Oracle Cloud (Always-Free VM) | Account creation, billing-free-tier selection, and identity verification require a human |
-| Generate and store real secrets (JWT signing secrets, VAPID keypair, TURN shared secret, Cloudinary URL, Brevo API key, Turnstile keys) in each host's environment-variable store | Secrets must never be generated or committed by an agent into source; they're pasted into provider dashboards by the owner |
-| Provision and harden the Oracle VM, install/configure coturn as a systemd service, open the required ports | Requires SSH access to real infrastructure the agent doesn't have accounts for |
-| Point a domain (or use the free subdomains) and confirm HTTPS/WSS certificates are issued | DNS control lives outside the repo |
-| Write and legally review the actual Terms of Service and Privacy Policy copy (Requirement Scope Section 19) | Legal content is a human/editorial decision, not a coding task — Claude Code should build the pages and wire the consent checkbox, with placeholder copy clearly marked |
-| Select/license the small CC0 music-track set for status backgrounds (Technical Specification's Free Music Archive line) | Curation and license-file verification is a judgment call |
-| Send a real test email to confirm verification/magic-link/OTP emails land and don't hit spam | Requires a live inbox and a live Brevo sending domain |
-| Run the actual first deploy, click through Vercel/Render project linking, and confirm the live URLs | One-time interactive setup in each provider's console |
-| Perform final manual QA on real devices/browsers (camera capture, push notification permission prompts, WebRTC across real NATs) | Needs physical devices and real network conditions an agent can't simulate |
-| Periodically watch usage dashboards (Section 2) and act on the fallback for any service approaching its free limit | Ongoing operational monitoring, not a one-time build step |
+| Task                                                                                                                                                                              | Why it's manual                                                                                                                                                         |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Create free accounts: Supabase, Cloudinary, Brevo, Cloudflare (Turnstile), Vercel, Render, GitHub, Backblaze B2, UptimeRobot, Oracle Cloud (Always-Free VM)                       | Account creation, billing-free-tier selection, and identity verification require a human                                                                                |
+| Generate and store real secrets (JWT signing secrets, VAPID keypair, TURN shared secret, Cloudinary URL, Brevo API key, Turnstile keys) in each host's environment-variable store | Secrets must never be generated or committed by an agent into source; they're pasted into provider dashboards by the owner                                              |
+| Provision and harden the Oracle VM, install/configure coturn as a systemd service, open the required ports                                                                        | Requires SSH access to real infrastructure the agent doesn't have accounts for                                                                                          |
+| Point a domain (or use the free subdomains) and confirm HTTPS/WSS certificates are issued                                                                                         | DNS control lives outside the repo                                                                                                                                      |
+| Write and legally review the actual Terms of Service and Privacy Policy copy (Requirement Scope Section 19)                                                                       | Legal content is a human/editorial decision, not a coding task — Claude Code should build the pages and wire the consent checkbox, with placeholder copy clearly marked |
+| Select/license the small CC0 music-track set for status backgrounds (Technical Specification's Free Music Archive line)                                                           | Curation and license-file verification is a judgment call                                                                                                               |
+| Send a real test email to confirm verification/magic-link/OTP emails land and don't hit spam                                                                                      | Requires a live inbox and a live Brevo sending domain                                                                                                                   |
+| Run the actual first deploy, click through Vercel/Render project linking, and confirm the live URLs                                                                               | One-time interactive setup in each provider's console                                                                                                                   |
+| Perform final manual QA on real devices/browsers (camera capture, push notification permission prompts, WebRTC across real NATs)                                                  | Needs physical devices and real network conditions an agent can't simulate                                                                                              |
+| Periodically watch usage dashboards (Section 2) and act on the fallback for any service approaching its free limit                                                                | Ongoing operational monitoring, not a one-time build step                                                                                                               |
 
 Everything else — CI workflow files, coturn config, the .env.example template — is Claude Code's job; only account creation and secret-pasting are manual.
 
