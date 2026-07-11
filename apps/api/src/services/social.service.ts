@@ -272,10 +272,14 @@ export async function listFriends(
   const pageRows = rows.slice(0, pagination.limit);
   const last = pageRows.at(-1);
   return {
-    items: pageRows.map((row) => ({
-      user: toUserSummaryDto(row.userAId === userId ? row.userB : row.userA),
-      friendsSince: row.createdAt.toISOString(),
-    })),
+    items: pageRows.map((row) => {
+      const other = row.userAId === userId ? row.userB : row.userA;
+      return {
+        user: toUserSummaryDto(other),
+        friendsSince: row.createdAt.toISOString(),
+        publicKey: other.publicKey,
+      };
+    }),
     ...(rows.length > pagination.limit ? { nextCursor: `${last!.userAId}_${last!.userBId}` } : {}),
   };
 }

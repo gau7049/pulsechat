@@ -82,6 +82,12 @@ export interface FriendRequestDto {
 export interface FriendDto {
   user: UserSummaryDto;
   friendsSince: string;
+  /**
+   * The friend's X25519 public key — needed to wrap conversation content keys
+   * when starting a chat with them (Technical Spec §6). Null until they have
+   * registered a key (e.g. seeded demo accounts).
+   */
+  publicKey: string | null;
 }
 
 /** "People you may know" — ranked by shared friends (§10.1). */

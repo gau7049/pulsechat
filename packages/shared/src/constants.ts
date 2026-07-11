@@ -17,6 +17,14 @@ export const LIMITS = {
   /** Default page size for cursor-paginated list endpoints. */
   PAGE_SIZE_DEFAULT: 20,
   PAGE_SIZE_MAX: 50,
+  /** Plaintext message cap (chars); ciphertext cap is derived from it. */
+  MESSAGE_TEXT_MAX: 4000,
+  /** base64(AES-GCM(4000-char UTF-8 text)) stays well under this. */
+  MESSAGE_CIPHERTEXT_MAX_CHARS: 24000,
+  /** base64(crypto_box_seal(32-byte key)) is 108 chars; headroom for variants. */
+  WRAPPED_KEY_MAX_CHARS: 256,
+  /** Other members besides the creator. */
+  GROUP_MEMBERS_MAX: 49,
 } as const;
 
 /**
