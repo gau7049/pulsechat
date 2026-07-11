@@ -40,3 +40,6 @@ export const emailLimiter = makeLimiter(15 * 60 * 1000, 8);
 
 /** General authenticated API traffic. */
 export const apiLimiter = makeLimiter(60 * 1000, 300);
+
+/** Friend-request sends — its own endpoint class per Technical Spec §7. */
+export const friendRequestLimiter = makeLimiter(15 * 60 * 1000, 30);

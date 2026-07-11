@@ -8,6 +8,7 @@ import * as devices from '../repositories/device.repository.js';
 import * as users from '../repositories/user.repository.js';
 import type { UserWithPrivacy } from '../repositories/user.repository.js';
 import { recordAudit } from './audit.service.js';
+import { linkInviteOnRegister } from './invite.service.js';
 import {
   magicLinkEmail,
   newDeviceEmail,
@@ -107,6 +108,10 @@ export async function register(
 
   if (body.email) {
     await sendVerificationEmail(user.id, body.email);
+  }
+  if (body.inviteCode) {
+    // §10.3: signing up through an invite connects the new user to the inviter.
+    await linkInviteOnRegister(user.id, body.inviteCode);
   }
 
   await recordAudit(user.id, 'register', { ip: context.ip, device: context.userAgent });

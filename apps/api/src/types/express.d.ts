@@ -5,6 +5,8 @@ declare global {
   namespace Express {
     interface Request {
       auth?: AccessTokenClaims;
+      /** Parsed query set by validateQuery (req.query is read-only in Express 5). */
+      validatedQuery?: unknown;
     }
   }
 }

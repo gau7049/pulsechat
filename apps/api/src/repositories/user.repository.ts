@@ -39,6 +39,45 @@ export function updateUser(id: string, data: Prisma.UserUpdateInput): Promise<Us
   return prisma.user.update({ where: { id }, data, include: { privacy: true } });
 }
 
+/**
+ * Username/display-name search (Requirement Scope §9). Ordered by username —
+ * unique, so it doubles as a stable keyset cursor.
+ */
+export function searchActiveUsers(options: {
+  q: string;
+  excludeIds: string[];
+  cursorUsername?: string;
+  limit: number;
+}): Promise<UserWithPrivacy[]> {
+  return prisma.user.findMany({
+    where: {
+      status: 'active',
+      id: { notIn: options.excludeIds },
+      OR: [
+        { username: { contains: options.q, mode: 'insensitive' } },
+        { displayName: { contains: options.q, mode: 'insensitive' } },
+      ],
+    },
+    include: { privacy: true },
+    orderBy: { username: 'asc' },
+    take: options.limit,
+    ...(options.cursorUsername
+      ? { cursor: { username: options.cursorUsername }, skip: 1 }
+      : {}),
+  });
+}
+
+export function findManyByIds(ids: string[]): Promise<UserWithPrivacy[]> {
+  return prisma.user.findMany({
+    where: { id: { in: ids }, status: 'active' },
+    include: { privacy: true },
+  });
+}
+
+export function countPosts(authorId: string): Promise<number> {
+  return prisma.post.count({ where: { authorId } });
+}
+
 export function updatePrivacy(
   userId: string,
   data: Prisma.PrivacySettingUpdateInput,

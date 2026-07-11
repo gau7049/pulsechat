@@ -24,3 +24,34 @@ export function validateBody<TSchema extends ZodTypeAny>(schema: TSchema): Reque
     next();
   };
 }
+
+/**
+ * Route-param accessor that collapses Express's `string | string[]` typing to
+ * one string; a missing/malformed param falls through to a service NOT_FOUND.
+ */
+export function param(req: Request, name: string): string {
+  const value = (req.params as Record<string, unknown>)[name];
+  return typeof value === 'string' ? value : '';
+}
+
+/**
+ * Query-string validation. Express 5's req.query is a read-only getter, so the
+ * parsed value lands on req.validatedQuery instead.
+ */
+export function validateQuery<TSchema extends ZodTypeAny>(schema: TSchema): RequestHandler {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    const result = schema.safeParse(req.query);
+    if (!result.success) {
+      next(
+        new AppError(
+          'VALIDATION_FAILED',
+          'Query validation failed',
+          result.error.flatten().fieldErrors as Record<string, string[]>,
+        ),
+      );
+      return;
+    }
+    req.validatedQuery = result.data as z.infer<TSchema>;
+    next();
+  };
+}

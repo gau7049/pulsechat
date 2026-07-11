@@ -7,6 +7,8 @@ import { notFound } from './middleware/not-found.js';
 import { requestContext } from './middleware/request-context.js';
 import { authRouter } from './routes/auth.routes.js';
 import { healthzRouter } from './routes/healthz.js';
+import { invitesRouter } from './routes/invites.routes.js';
+import { socialRouter } from './routes/social.routes.js';
 import { usersRouter } from './routes/users.routes.js';
 
 /**
@@ -25,7 +27,9 @@ export function createApp(): Express {
   app.use(healthzRouter);
   app.use(authRouter);
   app.use(usersRouter);
-  // Feature routers mount here milestone by milestone (friends, chat, …).
+  app.use(socialRouter);
+  app.use(invitesRouter);
+  // Feature routers mount here milestone by milestone (chat arrives in M3).
 
   app.use(notFound);
   app.use(errorHandler);

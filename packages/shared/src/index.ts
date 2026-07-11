@@ -5,3 +5,4 @@ export * from './schemas/auth.js';
 export * from './schemas/auth-requests.js';
 export * from './schemas/pagination.js';
 export * from './schemas/profile.js';
+export * from './schemas/social.js';

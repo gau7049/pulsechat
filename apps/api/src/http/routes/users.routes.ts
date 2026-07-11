@@ -11,6 +11,7 @@ import { prisma } from '../../lib/prisma.js';
 import * as users from '../../repositories/user.repository.js';
 import { signUpload } from '../../services/cloudinary.service.js';
 import { toMeDto } from '../../services/me.serializer.js';
+import { getPublicProfile } from '../../services/social.service.js';
 import { AppError } from '../errors.js';
 import { apiLimiter } from '../middleware/rate-limit.js';
 import { requireAuth } from '../middleware/require-auth.js';
@@ -73,6 +74,14 @@ usersRouter.patch('/users/me/avatar', validateBody(setAvatarSchema), async (req,
 usersRouter.post('/users/me/onboarded', async (req, res) => {
   const updated = await users.updateUser(req.auth!.sub, { onboardedAt: new Date() });
   res.json({ user: toMeDto(updated) });
+});
+
+/**
+ * Public profile by username (§7–8): registered after every /users/me route so
+ * the literal paths win; visibility and blocking rules live in the service.
+ */
+usersRouter.get('/users/:username', async (req, res) => {
+  res.json(await getPublicProfile(req.auth!.sub, req.params.username));
 });
 
 /** Owner-visible security audit log (§20), most recent first. */
