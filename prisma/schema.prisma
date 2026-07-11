@@ -1,0 +1,516 @@
+// PulseChat data model — implements Technical Spec §4 entity-by-entity.
+// Message content is ciphertext only (envelope encryption, Technical Spec §6):
+// no plaintext chat content exists anywhere in this schema.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Users & identity ─────────────────────────────────────────────────────────
+
+enum UserRole {
+  user
+  admin
+}
+
+/// Soft-delete lifecycle (Requirement Scope §16): deactivated restores on
+/// login; deleted requires the explicit restoration flow. Never hard-erased.
+enum UserStatus {
+  active
+  deactivated
+  deleted
+}
+
+enum Visibility {
+  public
+  friends
+  private
+}
+
+model User {
+  id           String     @id @default(uuid())
+  username     String     @unique
+  displayName  String     @map("display_name")
+  passwordHash String     @map("password_hash")
+  email        String?    @unique
+  emailVerified Boolean   @default(false) @map("email_verified")
+  birthDate    DateTime?  @map("birth_date") @db.Date
+  country      String?
+  state        String?
+  bio          String?
+  avatarUrl    String?    @map("avatar_url")
+  /// X25519 public key for envelope encryption (Technical Spec §6);
+  /// the private key never leaves the client.
+  publicKey    String?    @map("public_key")
+  visibility   Visibility @default(public)
+  role         UserRole   @default(user)
+  status       UserStatus @default(active)
+  createdAt    DateTime   @default(now()) @map("created_at")
+
+  privacy             PrivacySetting?
+  devices             Device[]
+  sentFriendRequests     FriendRequest[] @relation("SentRequests")
+  receivedFriendRequests FriendRequest[] @relation("ReceivedRequests")
+  friendshipsA        Friendship[]    @relation("FriendA")
+  friendshipsB        Friendship[]    @relation("FriendB")
+  blocksMade          Block[]         @relation("Blocker")
+  blocksReceived      Block[]         @relation("Blocked")
+  conversationMembers ConversationMember[]
+  messages            Message[]
+  messageStatuses     MessageStatus[]
+  reactions           MessageReaction[]
+  stars               MessageStar[]
+  statuses            Status[]
+  liveSessions        LiveSession[]
+  posts               Post[]
+  comments            Comment[]
+  likes               Like[]
+  saves               Save[]
+  reports             Report[]
+  notifications       Notification[]
+  auditLogEntries     AuditLogEntry[]
+  invites             Invite[]
+
+  @@map("users")
+}
+
+/// 1:1 with User (Requirement Scope §8 privacy controls).
+model PrivacySetting {
+  userId             String     @id @map("user_id")
+  whoCanSendRequests Visibility @default(public) @map("who_can_send_requests")
+  emailVisible       Boolean    @default(false) @map("email_visible")
+  birthdateVisible   Boolean    @default(false) @map("birthdate_visible")
+  lastSeenVisibility LastSeenVisibility @default(everyone) @map("last_seen_visibility")
+  statusVisibility   StatusVisibility   @default(everyone) @map("status_visibility")
+  readReceipts       Boolean    @default(true) @map("read_receipts")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("privacy_settings")
+}
+
+enum LastSeenVisibility {
+  everyone
+  friends
+  no_one
+}
+
+enum StatusVisibility {
+  everyone
+  friends
+}
+
+/// Device/session row backing refresh-token rotation, session revocation, and
+/// new-device confirmation (Requirement Scope §6.4–6.6, Technical Spec §5).
+model Device {
+  id                String    @id @default(uuid())
+  userId            String    @map("user_id")
+  refreshTokenHash  String?   @map("refresh_token_hash")
+  deviceFingerprint String    @map("device_fingerprint")
+  userAgent         String    @map("user_agent")
+  recognized        Boolean   @default(false)
+  lastSeenAt        DateTime  @default(now()) @map("last_seen_at")
+  revokedAt         DateTime? @map("revoked_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("devices")
+}
+
+// ── Social graph ─────────────────────────────────────────────────────────────
+
+enum FriendRequestStatus {
+  pending
+  accepted
+  rejected
+  cancelled
+}
+
+model FriendRequest {
+  id         String              @id @default(uuid())
+  fromUserId String              @map("from_user_id")
+  toUserId   String              @map("to_user_id")
+  status     FriendRequestStatus @default(pending)
+  createdAt  DateTime            @default(now()) @map("created_at")
+
+  fromUser User @relation("SentRequests", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser   User @relation("ReceivedRequests", fields: [toUserId], references: [id], onDelete: Cascade)
+
+  @@index([toUserId, status])
+  @@index([fromUserId, status])
+  @@map("friend_requests")
+}
+
+/// Symmetric friendship created on accept (Technical Spec §4). Stored once
+/// with userAId < userBId enforced in the service layer.
+model Friendship {
+  userAId   String   @map("user_a_id")
+  userBId   String   @map("user_b_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  userA User @relation("FriendA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB User @relation("FriendB", fields: [userBId], references: [id], onDelete: Cascade)
+
+  @@id([userAId, userBId])
+  @@index([userBId])
+  @@map("friendships")
+}
+
+/// One-directional block, fully enforced against the blocked side (§10.2).
+model Block {
+  blockerId String   @map("blocker_id")
+  blockedId String   @map("blocked_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  blocker User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@id([blockerId, blockedId])
+  @@index([blockedId])
+  @@map("blocks")
+}
+
+/// Personal invite link (Requirement Scope §10.3).
+model Invite {
+  code      String   @id
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("invites")
+}
+
+// ── Messaging ────────────────────────────────────────────────────────────────
+
+enum ConversationType {
+  direct
+  group
+}
+
+model Conversation {
+  id        String           @id @default(uuid())
+  type      ConversationType
+  /// Group conversations only.
+  name      String?
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  members  ConversationMember[]
+  messages Message[]
+
+  @@map("conversations")
+}
+
+enum ConversationRole {
+  member
+  admin
+}
+
+model ConversationMember {
+  conversationId String           @map("conversation_id")
+  userId         String           @map("user_id")
+  role           ConversationRole @default(member)
+  /// Conversation content key encrypted with this member's X25519 public key —
+  /// per-member envelope encryption (Technical Spec §6).
+  wrappedKey     String           @map("wrapped_key")
+  joinedAt       DateTime         @default(now()) @map("joined_at")
+  pinned         Boolean          @default(false)
+  muted          Boolean          @default(false)
+  archived       Boolean          @default(false)
+  /// Per-user "delete for me" horizon: messages up to this point are hidden.
+  clearedAt      DateTime?        @map("cleared_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  @@index([userId])
+  @@map("conversation_members")
+}
+
+model Message {
+  id                  String    @id @default(uuid())
+  conversationId      String    @map("conversation_id")
+  senderId            String    @map("sender_id")
+  /// AES-256-GCM ciphertext — the server never stores plaintext content.
+  ciphertext          String
+  nonce               String
+  replyToId           String?   @map("reply_to_id")
+  forwardedFromId     String?   @map("forwarded_from_id")
+  editedAt            DateTime? @map("edited_at")
+  deletedForEveryoneAt DateTime? @map("deleted_for_everyone_at")
+  /// Server-assigned, monotonic per conversation — total message order (§21.2).
+  sequence            Int
+  /// Client-generated idempotency key — duplicate sends detected and no-op'd.
+  clientUuid          String    @map("client_uuid")
+  createdAt           DateTime  @default(now()) @map("created_at")
+
+  conversation  Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender        User              @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo       Message?          @relation("Replies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies       Message[]         @relation("Replies")
+  forwardedFrom Message?          @relation("Forwards", fields: [forwardedFromId], references: [id], onDelete: SetNull)
+  forwards      Message[]         @relation("Forwards")
+  statuses      MessageStatus[]
+  reactions     MessageReaction[]
+  stars         MessageStar[]
+
+  @@unique([conversationId, sequence])
+  @@unique([conversationId, clientUuid])
+  @@index([conversationId, sequence])
+  @@map("messages")
+}
+
+enum MessageDeliveryState {
+  notified
+  delivered
+  read
+}
+
+/// Per-recipient delivery row — powers §14.1 indicators and §14.2 breakdowns.
+model MessageStatus {
+  messageId String               @map("message_id")
+  userId    String               @map("user_id")
+  state     MessageDeliveryState
+  updatedAt DateTime             @updatedAt @map("updated_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([userId])
+  @@map("message_statuses")
+}
+
+model MessageReaction {
+  messageId String   @map("message_id")
+  userId    String   @map("user_id")
+  emoji     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@map("message_reactions")
+}
+
+/// Star has no emoji column, just presence (Technical Spec §4); private to the
+/// starring user (§14.6).
+model MessageStar {
+  messageId String   @map("message_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([userId])
+  @@map("message_stars")
+}
+
+// ── Status & live ────────────────────────────────────────────────────────────
+
+model Status {
+  id           String           @id @default(uuid())
+  userId       String           @map("user_id")
+  mediaUrl     String?          @map("media_url")
+  caption      String?
+  musicTrackId String?          @map("music_track_id")
+  visibility   StatusVisibility @default(everyone)
+  /// created_at + 24 h; expired rows swept by a cron job (Technical Spec §4).
+  expiresAt    DateTime         @map("expires_at")
+  createdAt    DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("statuses")
+}
+
+/// Row exists only while a broadcast is active/just ended (Technical Spec §4).
+model LiveSession {
+  id         String           @id @default(uuid())
+  userId     String           @map("user_id")
+  visibility StatusVisibility @default(everyone)
+  startedAt  DateTime         @default(now()) @map("started_at")
+  endedAt    DateTime?        @map("ended_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("live_sessions")
+}
+
+// ── Posts & feed ─────────────────────────────────────────────────────────────
+
+model Post {
+  id           String   @id @default(uuid())
+  authorId     String   @map("author_id")
+  mediaUrl     String   @map("media_url")
+  caption      String?
+  /// Denormalized counters kept in sync via transaction (Technical Spec §4).
+  likeCount    Int      @default(0) @map("like_count")
+  commentCount Int      @default(0) @map("comment_count")
+  viewCount    Int      @default(0) @map("view_count")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  author   User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  hashtags PostHashtag[]
+  comments Comment[]
+  likes    Like[]
+  saves    Save[]
+
+  @@index([authorId, createdAt])
+  @@map("posts")
+}
+
+model Hashtag {
+  tag   String        @id
+  posts PostHashtag[]
+
+  @@map("hashtags")
+}
+
+model PostHashtag {
+  tag    String
+  postId String @map("post_id")
+
+  hashtag Hashtag @relation(fields: [tag], references: [tag], onDelete: Cascade)
+  post    Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@id([tag, postId])
+  @@index([tag])
+  @@map("post_hashtags")
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  postId    String   @map("post_id")
+  userId    String   @map("user_id")
+  body      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([postId, createdAt])
+  @@map("comments")
+}
+
+model Like {
+  postId    String   @map("post_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+  @@index([userId, createdAt])
+  @@map("likes")
+}
+
+/// Save is private, never notifies the author (Requirement Scope §13.5).
+model Save {
+  postId    String   @map("post_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+  @@index([userId, createdAt])
+  @@map("saves")
+}
+
+// ── Trust & safety, notifications, analytics ─────────────────────────────────
+
+enum ReportTargetType {
+  post
+  message
+  profile
+}
+
+enum ReportStatus {
+  open
+  reviewed
+  actioned
+}
+
+model Report {
+  id         String           @id @default(uuid())
+  reporterId String           @map("reporter_id")
+  targetType ReportTargetType @map("target_type")
+  targetId   String           @map("target_id")
+  reason     String
+  status     ReportStatus     @default(open)
+  createdAt  DateTime         @default(now()) @map("created_at")
+
+  reporter User @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@map("reports")
+}
+
+model Notification {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  type        String
+  payloadJson Json      @map("payload_json")
+  readAt      DateTime? @map("read_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+/// Owner-visible security log (Requirement Scope §20).
+model AuditLogEntry {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  eventType String   @map("event_type")
+  ip        String?
+  device    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("audit_log_entries")
+}
+
+/// Raw event stream aggregated for the admin dashboard (Technical Spec §13).
+/// Deliberately has no relation to chat content.
+model AnalyticsEvent {
+  id        BigInt   @id @default(autoincrement())
+  eventType String   @map("event_type")
+  userId    String?  @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([eventType, createdAt])
+  @@map("analytics_events")
+}
+
+/// Web Push subscription per device/browser (Technical Spec §12).
+model PushSubscription {
+  endpoint  String   @id
+  userId    String   @map("user_id")
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
