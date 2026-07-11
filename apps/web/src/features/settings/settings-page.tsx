@@ -1,5 +1,6 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { AppearanceSection } from './appearance-section';
+import { BlockedSection } from './blocked-section';
 import { PrivacySection } from './privacy-section';
 import { ProfileSection } from './profile-section';
 import { SecuritySection } from './security-section';
@@ -7,6 +8,7 @@ import { SecuritySection } from './security-section';
 const TABS = [
   { path: 'profile', label: 'Profile' },
   { path: 'privacy', label: 'Privacy' },
+  { path: 'blocked', label: 'Blocked' },
   { path: 'security', label: 'Security' },
   { path: 'appearance', label: 'Appearance' },
 ] as const;
@@ -41,6 +43,7 @@ export function SettingsPage() {
           <Route index element={<Navigate to="profile" replace />} />
           <Route path="profile" element={<ProfileSection />} />
           <Route path="privacy" element={<PrivacySection />} />
+          <Route path="blocked" element={<BlockedSection />} />
           <Route path="security" element={<SecuritySection />} />
           <Route path="appearance" element={<AppearanceSection />} />
         </Routes>

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { registerBodySchema } from '@pulsechat/shared';
 import { ApiError } from '../../lib/api';
 import { Button } from '../../components/ui/button';
@@ -14,6 +14,9 @@ type FieldErrors = Partial<Record<string, string>>;
 export function RegisterPage() {
   const { register } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // Present when arriving from an invite landing page (§10.3).
+  const inviteCode = searchParams.get('invite');
 
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -65,6 +68,7 @@ export function RegisterPage() {
         email: email.trim() || undefined,
         birthDate: birthDate || undefined,
         turnstileToken: turnstileToken ?? undefined,
+        inviteCode: inviteCode ?? undefined,
       });
       navigate('/', { replace: true });
     } catch (error) {
@@ -96,6 +100,11 @@ export function RegisterPage() {
       }
     >
       <form onSubmit={onSubmit} noValidate className="flex flex-col gap-4">
+        {inviteCode && (
+          <p className="rounded-lg bg-accent-soft px-3 py-2 text-sm text-accent-strong">
+            You're joining through a friend's invite — you'll be connected after signup.
+          </p>
+        )}
         <Input
           label="Username"
           autoComplete="username"

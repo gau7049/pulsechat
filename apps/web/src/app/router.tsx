@@ -14,6 +14,9 @@ import { RouteErrorPage } from '../features/errors/route-error-page';
 import { HomePage } from '../features/home/home-page';
 import { PrivacyPolicyPage, TermsPage } from '../features/legal/legal-pages';
 import { SettingsPage } from '../features/settings/settings-page';
+import { InviteLandingPage } from '../features/social/invite-landing-page';
+import { PeoplePage } from '../features/social/people-page';
+import { ProfilePage } from '../features/social/profile-page';
 import { AppShell } from './app-shell';
 
 export const router = createBrowserRouter([
@@ -37,6 +40,8 @@ export const router = createBrowserRouter([
       { path: 'reset-password', element: <ResetPasswordPage /> },
       { path: 'terms', element: <TermsPage /> },
       { path: 'privacy', element: <PrivacyPolicyPage /> },
+      // Invite landing works signed in or out (§10.3).
+      { path: 'invite/:code', element: <InviteLandingPage /> },
       // The home route renders the guest landing when signed out.
       {
         element: <AppShell />,
@@ -48,7 +53,11 @@ export const router = createBrowserRouter([
         children: [
           {
             element: <AppShell />,
-            children: [{ path: 'settings/*', element: <SettingsPage /> }],
+            children: [
+              { path: 'settings/*', element: <SettingsPage /> },
+              { path: 'people/*', element: <PeoplePage /> },
+              { path: 'u/:username', element: <ProfilePage /> },
+            ],
           },
         ],
       },

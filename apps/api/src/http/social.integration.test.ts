@@ -128,7 +128,11 @@ describe('GET /search/users', () => {
   it('paginates with a cursor', async () => {
     const marker = uname('pg');
     const viewer = await registerUser();
-    await Promise.all([seedUser({ displayName: `Page ${marker}` }), seedUser({ displayName: `Page ${marker}` }), seedUser({ displayName: `Page ${marker}` })]);
+    await Promise.all([
+      seedUser({ displayName: `Page ${marker}` }),
+      seedUser({ displayName: `Page ${marker}` }),
+      seedUser({ displayName: `Page ${marker}` }),
+    ]);
 
     const first = await asUser(viewer).get(`/search/users?q=${marker}&limit=2`);
     expect(first.body.items).toHaveLength(2);
@@ -398,17 +402,16 @@ describe('invites (§10.3)', () => {
 });
 
 describe('GET /users/:username (public profile)', () => {
-  it('shows the owner their own full profile with pending counts', async () => {
+  it('shows the Instagram-style stat triple: posts, friends, pending sent (§13.4)', async () => {
     const alice = await registerUser();
     const bob = await registerUser();
-    await asUser(bob).post('/friend-requests', { toUserId: alice.id });
+    await asUser(alice).post('/friend-requests', { toUserId: bob.id });
 
     const res = await asUser(alice).get(`/users/${alice.username}`);
     expect(res.status).toBe(200);
     expect(res.body.relationship).toBe('self');
     expect(res.body.details).toBeTruthy();
-    expect(res.body.stats.friends).toBe(0);
-    expect(res.body.stats.pendingRequests).toBe(1);
+    expect(res.body.stats).toEqual({ posts: 0, friends: 0, pendingSent: 1 });
   });
 
   it('applies the three visibility levels (§8)', async () => {

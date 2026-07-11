@@ -61,9 +61,7 @@ export function searchActiveUsers(options: {
     include: { privacy: true },
     orderBy: { username: 'asc' },
     take: options.limit,
-    ...(options.cursorUsername
-      ? { cursor: { username: options.cursorUsername }, skip: 1 }
-      : {}),
+    ...(options.cursorUsername ? { cursor: { username: options.cursorUsername }, skip: 1 } : {}),
   });
 }
 

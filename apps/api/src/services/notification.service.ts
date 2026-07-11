@@ -20,14 +20,12 @@ export async function notify(
     const row = await prisma.notification.create({
       data: { userId, type, payloadJson: payload as unknown as Prisma.InputJsonValue },
     });
-    getIo()
-      ?.to(`user:${userId}`)
-      .emit(SERVER_EVENTS.NOTIFICATION_NEW, {
-        id: row.id,
-        type,
-        payload,
-        createdAt: row.createdAt.toISOString(),
-      });
+    getIo()?.to(`user:${userId}`).emit(SERVER_EVENTS.NOTIFICATION_NEW, {
+      id: row.id,
+      type,
+      payload,
+      createdAt: row.createdAt.toISOString(),
+    });
     logger.info({ event: 'notification.sent', type, userId }, 'notification sent');
   } catch (error) {
     // Notifications are best-effort; never fail the action that caused one.

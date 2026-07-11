@@ -5,3 +5,7 @@ coverage
 pnpm-lock.yaml
 prisma/migrations
 *.pdf
+# User-supplied source-of-truth documents and local agent config — not ours to reformat
+Technical Specification.md
+Web App Requirement Scope.md
+.claude/

@@ -37,6 +37,16 @@ export function AppShell() {
               Home
             </NavLink>
             <NavLink
+              to="/people"
+              className={({ isActive }) =>
+                `rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                  isActive ? 'bg-accent-soft text-accent-strong' : 'text-fg-muted hover:text-fg'
+                }`
+              }
+            >
+              People
+            </NavLink>
+            <NavLink
               to="/settings"
               className={({ isActive }) =>
                 `rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${

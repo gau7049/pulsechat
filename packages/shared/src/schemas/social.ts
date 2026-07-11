@@ -128,8 +128,8 @@ export interface PublicProfileDto {
   stats: {
     posts: number;
     friends: number;
-    /** Only on the viewer's own profile. */
-    pendingRequests?: number;
+    /** Pending sent friend requests — the third Instagram-style stat (§13.4). */
+    pendingSent: number;
   } | null;
   /** Shared friends with the viewer; absent on own profile. */
   mutualCount?: number;

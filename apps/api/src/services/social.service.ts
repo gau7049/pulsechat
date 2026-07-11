@@ -220,7 +220,9 @@ export async function respondToRequest(
   if (userId !== requiredRole) {
     throw new AppError(
       'FORBIDDEN',
-      action === 'cancel' ? 'Only the sender can cancel a request' : 'Only the recipient can respond',
+      action === 'cancel'
+        ? 'Only the sender can cancel a request'
+        : 'Only the recipient can respond',
     );
   }
   if (request.status !== 'pending') {
@@ -235,10 +237,7 @@ export async function respondToRequest(
   } else {
     await social.setRequestStatus(request.id, action === 'reject' ? 'rejected' : 'cancelled');
   }
-  logger.info(
-    { event: `social.request_${action}`, requestId, userId },
-    'friend request resolved',
-  );
+  logger.info({ event: `social.request_${action}`, requestId, userId }, 'friend request resolved');
 }
 
 export async function listRequests(
@@ -277,9 +276,7 @@ export async function listFriends(
       user: toUserSummaryDto(row.userAId === userId ? row.userB : row.userA),
       friendsSince: row.createdAt.toISOString(),
     })),
-    ...(rows.length > pagination.limit
-      ? { nextCursor: `${last!.userAId}_${last!.userBId}` }
-      : {}),
+    ...(rows.length > pagination.limit ? { nextCursor: `${last!.userAId}_${last!.userBId}` } : {}),
   };
 }
 
@@ -324,9 +321,7 @@ export async function suggestions(userId: string): Promise<SuggestionDto[]> {
     }
   }
 
-  const ranked = [...counts.entries()]
-    .sort((x, y) => y[1] - x[1])
-    .slice(0, SUGGESTION_LIMIT);
+  const ranked = [...counts.entries()].sort((x, y) => y[1] - x[1]).slice(0, SUGGESTION_LIMIT);
   const candidates = await users.findManyByIds(ranked.map(([id]) => id));
   const byId = new Map(candidates.map((c) => [c.id, c]));
   return ranked
@@ -383,10 +378,9 @@ export async function getPublicProfile(
 
   const relationships = await relationshipMap(viewerId, [user]);
   const info = relationships.get(user.id)!;
-  const canSeeDetails =
-    isSelf || user.visibility === 'public' || info.relationship === 'friends';
+  const canSeeDetails = isSelf || user.visibility === 'public' || info.relationship === 'friends';
 
-  const [postCount, friendCount, mutualCounts, pendingIncoming] = await Promise.all([
+  const [postCount, friendCount, mutualCounts, pendingSent] = await Promise.all([
     canSeeDetails ? users.countPosts(user.id) : Promise.resolve(0),
     canSeeDetails
       ? social
@@ -396,7 +390,7 @@ export async function getPublicProfile(
     isSelf
       ? Promise.resolve(new Map<string, number>())
       : social.friendIds(viewerId).then((ids) => mutualCountsFor(ids, [user.id])),
-    isSelf ? social.countPendingIncoming(user.id) : Promise.resolve(0),
+    canSeeDetails ? social.countPendingOutgoing(user.id) : Promise.resolve(0),
   ]);
 
   return {
@@ -422,7 +416,7 @@ export async function getPublicProfile(
       ? {
           posts: postCount,
           friends: friendCount,
-          ...(isSelf ? { pendingRequests: pendingIncoming } : {}),
+          pendingSent,
         }
       : null,
     ...(isSelf ? {} : { mutualCount: mutualCounts.get(user.id) ?? 0 }),

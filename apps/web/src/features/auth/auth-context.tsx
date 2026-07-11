@@ -24,6 +24,8 @@ interface RegisterInput {
   email?: string;
   birthDate?: string;
   turnstileToken?: string;
+  /** Carried from an invite landing link — connects the signup to the inviter (§10.3). */
+  inviteCode?: string;
 }
 
 interface AuthContextValue {

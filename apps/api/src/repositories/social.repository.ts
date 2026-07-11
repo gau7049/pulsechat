@@ -18,9 +18,7 @@ export function findFriendship(a: string, b: string): Promise<Friendship | null>
 }
 
 export function deleteFriendship(a: string, b: string): Promise<Friendship | null> {
-  return prisma.friendship
-    .delete({ where: { userAId_userBId: pairKey(a, b) } })
-    .catch(() => null);
+  return prisma.friendship.delete({ where: { userAId_userBId: pairKey(a, b) } }).catch(() => null);
 }
 
 /** Every friend id of one user — small at product scale, used for filtering. */
@@ -100,17 +98,16 @@ export function countPendingOutgoing(userId: string): Promise<number> {
   return prisma.friendRequest.count({ where: { fromUserId: userId, status: 'pending' } });
 }
 
-export function countPendingIncoming(userId: string): Promise<number> {
-  return prisma.friendRequest.count({ where: { toUserId: userId, status: 'pending' } });
-}
-
 export function listPending(
   userId: string,
   direction: 'incoming' | 'outgoing',
   options: { cursor?: string; limit: number },
 ): Promise<FriendRequestWithUsers[]> {
   return prisma.friendRequest.findMany({
-    where: { status: 'pending', ...(direction === 'incoming' ? { toUserId: userId } : { fromUserId: userId }) },
+    where: {
+      status: 'pending',
+      ...(direction === 'incoming' ? { toUserId: userId } : { fromUserId: userId }),
+    },
     include: { fromUser: true, toUser: true },
     orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
     take: options.limit,
