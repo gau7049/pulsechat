@@ -1,0 +1,49 @@
+# Nightly database backup (Technical Spec §16): pg_dump the Supabase database
+# and upload to Backblaze B2. Requires repo secrets:
+#   DATABASE_URL, B2_APPLICATION_KEY_ID, B2_APPLICATION_KEY, B2_BUCKET_NAME
+name: Nightly DB backup
+
+on:
+  schedule:
+    - cron: '30 21 * * *' # 03:00 IST daily
+  workflow_dispatch: {}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Postgres client
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+
+      - name: Dump database
+        run: |
+          STAMP="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          pg_dump --no-owner --no-privileges --format=custom \
+            --file="pulsechat-$STAMP.dump" "$DATABASE_URL"
+          gzip "pulsechat-$STAMP.dump"
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Upload to Backblaze B2
+        run: |
+          pipx install b2
+          b2 account authorize "$B2_APPLICATION_KEY_ID" "$B2_APPLICATION_KEY"
+          b2 file upload "$B2_BUCKET_NAME" \
+            "pulsechat-$STAMP.dump.gz" "backups/pulsechat-$STAMP.dump.gz"
+        env:
+          B2_APPLICATION_KEY_ID: ${{ secrets.B2_APPLICATION_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+          B2_BUCKET_NAME: ${{ secrets.B2_BUCKET_NAME }}
+
+      - name: Prune dumps older than 14 days
+        run: |
+          CUTOFF="$(date -u -d '14 days ago' +%s)000"
+          b2 ls --recursive --json "b2://$B2_BUCKET_NAME/backups/" \
+            | jq -r --arg cutoff "$CUTOFF" \
+                '.[] | select(.uploadTimestamp < ($cutoff | tonumber)) | .fileName' \
+            | while read -r name; do
+                [ -n "$name" ] && b2 rm "b2://$B2_BUCKET_NAME/$name"
+              done
+        env:
+          B2_BUCKET_NAME: ${{ secrets.B2_BUCKET_NAME }}
