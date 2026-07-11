@@ -32,7 +32,7 @@ pnpm install
 cp .env.example .env        # fill in DATABASE_URL (Supabase) at minimum
 pnpm db:migrate             # create schema
 pnpm db:seed                # demo data
-pnpm dev                    # api on :4000, web on :5173
+pnpm dev                    # api on :4000, web on :8000
 ```
 
 `pnpm lint · typecheck · test · build` must all pass before a change is done

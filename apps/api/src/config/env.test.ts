@@ -6,7 +6,7 @@ describe('parseEnv', () => {
     const env = parseEnv({} as NodeJS.ProcessEnv);
     expect(env.NODE_ENV).toBe('development');
     expect(env.PORT).toBe(4000);
-    expect(env.APP_ORIGIN).toBe('http://localhost:5173');
+    expect(env.APP_ORIGIN).toBe('http://localhost:8000');
   });
 
   it('coerces PORT from a string', () => {
