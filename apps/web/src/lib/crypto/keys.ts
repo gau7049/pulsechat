@@ -1,4 +1,6 @@
-import sodium from 'libsodium-wrappers';
+// Sumo build: the standard build omits crypto_pwhash (Argon2id), which the
+// password-derived key wrapping requires.
+import sodium from 'libsodium-wrappers-sumo';
 import { idbGet, idbPut } from '../idb.js';
 
 /**
