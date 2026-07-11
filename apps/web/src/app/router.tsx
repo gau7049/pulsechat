@@ -12,6 +12,7 @@ import {
 import { NotFoundPage } from '../features/errors/not-found-page';
 import { RouteErrorPage } from '../features/errors/route-error-page';
 import { HomePage } from '../features/home/home-page';
+import { ChatsPage } from '../features/chat/chats-page';
 import { PrivacyPolicyPage, TermsPage } from '../features/legal/legal-pages';
 import { SettingsPage } from '../features/settings/settings-page';
 import { InviteLandingPage } from '../features/social/invite-landing-page';
@@ -57,6 +58,8 @@ export const router = createBrowserRouter([
               { path: 'settings/*', element: <SettingsPage /> },
               { path: 'people/*', element: <PeoplePage /> },
               { path: 'u/:username', element: <ProfilePage /> },
+              { path: 'chats', element: <ChatsPage /> },
+              { path: 'chats/:id', element: <ChatsPage /> },
             ],
           },
         ],

@@ -1,12 +1,15 @@
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { Avatar } from '../components/ui/avatar';
 import { useAuth } from '../features/auth/auth-context';
+import { useChatSocketBridge, useConversations } from '../features/chat/use-chat';
 import { OnboardingTour } from '../features/onboarding/onboarding-tour';
 
 /** Signed-in application chrome: top bar + content outlet. */
 export function AppShell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  // One socket-event bridge per signed-in session keeps every cache live.
+  useChatSocketBridge(user?.id);
 
   if (!user) return <Outlet />;
 
@@ -36,6 +39,7 @@ export function AppShell() {
             >
               Home
             </NavLink>
+            <ChatsNavLink />
             <NavLink
               to="/people"
               className={({ isActive }) =>
@@ -79,5 +83,31 @@ export function AppShell() {
 
       {!user.onboardedAt && <OnboardingTour />}
     </div>
+  );
+}
+
+/** Chats nav item with the total-unread badge (§14.1), fed by the live cache. */
+function ChatsNavLink() {
+  const conversations = useConversations();
+  const unread = conversations.data?.items.reduce((sum, c) => sum + c.unreadCount, 0) ?? 0;
+  return (
+    <NavLink
+      to="/chats"
+      className={({ isActive }) =>
+        `relative rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+          isActive ? 'bg-accent-soft text-accent-strong' : 'text-fg-muted hover:text-fg'
+        }`
+      }
+    >
+      Chats
+      {unread > 0 && (
+        <span
+          aria-label={`${unread} unread messages`}
+          className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[9px] font-bold text-on-accent"
+        >
+          {unread > 99 ? '99+' : unread}
+        </span>
+      )}
+    </NavLink>
   );
 }

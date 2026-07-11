@@ -14,6 +14,11 @@ export function setAccessToken(token: string | null): void {
   accessToken = token;
 }
 
+/** The socket handshake reads the current token on every attempt. */
+export function getAccessToken(): string | null {
+  return accessToken;
+}
+
 /** AuthProvider registers a handler that clears state when refresh fails. */
 export function setSessionExpiredHandler(handler: () => void): void {
   onSessionExpired = handler;

@@ -33,3 +33,12 @@ export async function idbPut(key: string, value: unknown): Promise<void> {
     tx.onerror = () => reject(tx.error as Error);
   });
 }
+
+export async function idbDelete(key: string): Promise<void> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite').objectStore(STORE).delete(key);
+    tx.onsuccess = () => resolve();
+    tx.onerror = () => reject(tx.error as Error);
+  });
+}

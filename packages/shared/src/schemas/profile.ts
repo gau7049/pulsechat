@@ -48,6 +48,8 @@ export interface MeDto {
   state: string | null;
   bio: string | null;
   avatarUrl: string | null;
+  /** Own X25519 public key — wraps conversation keys for self (Tech Spec §6). */
+  publicKey: string | null;
   visibility: Visibility;
   role: 'user' | 'admin';
   otpEnabled: boolean;

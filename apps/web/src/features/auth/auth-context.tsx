@@ -4,13 +4,16 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import type { AuthResultDto, MeDto } from '@pulsechat/shared';
-import { post, setAccessToken, setSessionExpiredHandler } from '../../lib/api';
+import { get, getAccessToken, post, setAccessToken, setSessionExpiredHandler } from '../../lib/api';
 import { getDeviceFingerprint } from '../../lib/fingerprint';
-import { generateKeypair } from '../../lib/crypto/keys';
+import { generateKeypair, unlockPrivateKey } from '../../lib/crypto/keys';
+import { clearSessionKey, saveSessionKey } from '../../lib/crypto/key-session';
+import { connectSocket, disconnectSocket } from '../../lib/socket';
 
 export type LoginResult =
   | { kind: 'session' }
@@ -46,16 +49,43 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUserState] = useState<MeDto | null>(null);
   const [restoring, setRestoring] = useState(true);
+  // Held between the password step and a 2FA step so the account private key
+  // can be unlocked once the session lands (Technical Spec §6).
+  const pendingPassword = useRef<string | null>(null);
+  // Stable identity for clearSession (it must not re-run the restore effect).
+  const userIdRef = useRef<string | null>(null);
 
   const adoptSession = useCallback((result: AuthResultDto) => {
     setAccessToken(result.accessToken);
     setUserState(result.user);
+    userIdRef.current = result.user.id;
+    const password = pendingPassword.current;
+    pendingPassword.current = null;
+    if (password) {
+      // Best-effort: a device without the stored keypair stays locked and the
+      // chat UI explains it (§6 trade-off).
+      void unlockPrivateKey(result.user.id, password).then((privateKey) => {
+        if (privateKey) void saveSessionKey(result.user.id, privateKey);
+      });
+    }
   }, []);
 
   const clearSession = useCallback(() => {
+    if (userIdRef.current) void clearSessionKey(userIdRef.current);
+    userIdRef.current = null;
+    disconnectSocket();
     setAccessToken(null);
     setUserState(null);
   }, []);
+
+  // The live socket exists exactly while a user session does (§21.1).
+  useEffect(() => {
+    if (!user) return;
+    connectSocket(getAccessToken, () => get('/users/me'));
+    return () => {
+      // Only disconnect on logout (clearSession), not on user object updates.
+    };
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- reconnect only when the account changes
 
   // Silent restore: the httpOnly refresh cookie is the only persisted secret.
   useEffect(() => {
@@ -83,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         deviceFingerprint: getDeviceFingerprint(),
       });
       await keypair.store(result.user.id);
+      await saveSessionKey(result.user.id, keypair.privateKey);
       adoptSession(result);
     },
     [adoptSession],
@@ -90,6 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (username: string, password: string, turnstileToken?: string): Promise<LoginResult> => {
+      pendingPassword.current = password;
       const result = await post<
         | AuthResultDto
         | { otpRequired: true; pendingToken: string }

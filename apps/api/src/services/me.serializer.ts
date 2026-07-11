@@ -14,6 +14,7 @@ export function toMeDto(user: UserWithPrivacy): MeDto {
     state: user.state,
     bio: user.bio,
     avatarUrl: user.avatarUrl,
+    publicKey: user.publicKey,
     visibility: user.visibility,
     role: user.role,
     otpEnabled: user.otpEnabled,

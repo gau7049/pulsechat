@@ -38,9 +38,12 @@ async function deriveKey(password: string, salt: Uint8Array): Promise<Uint8Array
  * persists locally keyed by a temporary id (rekeyed to the real user id right
  * after registration), and returns the public key for the register call.
  */
-export async function generateKeypair(
-  password: string,
-): Promise<{ publicKey: string; store: (userId: string) => Promise<void> }> {
+export async function generateKeypair(password: string): Promise<{
+  publicKey: string;
+  /** Raw private key — seed the session cache so chats work immediately. */
+  privateKey: Uint8Array;
+  store: (userId: string) => Promise<void>;
+}> {
   await sodium.ready;
   const pair = sodium.crypto_box_keypair();
   const salt = sodium.randombytes_buf(sodium.crypto_pwhash_SALTBYTES);
@@ -60,6 +63,7 @@ export async function generateKeypair(
 
   return {
     publicKey: record.publicKey,
+    privateKey: pair.privateKey,
     store: (userId: string) => idbPut(recordKey(userId), record),
   };
 }
