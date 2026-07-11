@@ -1,5 +1,15 @@
-import 'dotenv/config';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import { config } from 'dotenv';
 import { z } from 'zod';
+
+// Load ./.env first (if any), then the repo-root .env as fallback — dotenv
+// never overrides variables that are already set, so process-level env and
+// test overrides always win.
+config();
+config({
+  path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../.env'),
+});
 
 /**
  * All process configuration enters through this schema (Technical Spec §17,
@@ -44,7 +54,11 @@ export type Env = z.infer<typeof envSchema>;
 
 /** Parse an environment map, throwing a readable aggregate error on failure. */
 export function parseEnv(source: NodeJS.ProcessEnv): Env {
-  const result = envSchema.safeParse(source);
+  // .env templates ship empty strings for unset values — treat them as absent.
+  const withoutEmpty = Object.fromEntries(
+    Object.entries(source).filter(([, value]) => value !== ''),
+  );
+  const result = envSchema.safeParse(withoutEmpty);
   if (!result.success) {
     const issues = result.error.issues
       .map((issue) => `  ${issue.path.join('.')}: ${issue.message}`)

@@ -50,6 +50,10 @@ model User {
   visibility   Visibility @default(public)
   role         UserRole   @default(user)
   status       UserStatus @default(active)
+  /// Optional email-OTP 2FA (Requirement Scope §6.5) — requires verified email.
+  otpEnabled   Boolean    @default(false) @map("otp_enabled")
+  /// Set when the first-login onboarding tour is completed/dismissed (§6.7).
+  onboardedAt  DateTime?  @map("onboarded_at")
   createdAt    DateTime   @default(now()) @map("created_at")
 
   privacy             PrivacySetting?
@@ -60,6 +64,7 @@ model User {
   friendshipsB        Friendship[]    @relation("FriendB")
   blocksMade          Block[]         @relation("Blocker")
   blocksReceived      Block[]         @relation("Blocked")
+  authTokens          AuthToken[]
   conversationMembers ConversationMember[]
   messages            Message[]
   messageStatuses     MessageStatus[]
@@ -122,6 +127,36 @@ model Device {
 
   @@index([userId])
   @@map("devices")
+}
+
+enum AuthTokenType {
+  verify_email
+  magic_link
+  otp
+  device_confirm
+  password_reset
+}
+
+/// Single-use, short-lived tokens delivered over email (Technical Spec §5).
+/// Only the SHA-256 hash is stored; the raw value exists once, in the email.
+model AuthToken {
+  id                String        @id @default(uuid())
+  userId            String        @map("user_id")
+  type              AuthTokenType
+  tokenHash         String        @unique @map("token_hash")
+  /// Fingerprint of the device the flow was initiated from, when relevant
+  /// (new-device confirmation, magic link).
+  deviceFingerprint String?       @map("device_fingerprint")
+  /// Wrong-code attempts for OTP; the token dies after too many.
+  attempts          Int           @default(0)
+  expiresAt         DateTime      @map("expires_at")
+  consumedAt        DateTime?     @map("consumed_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+  @@map("auth_tokens")
 }
 
 // ── Social graph ─────────────────────────────────────────────────────────────

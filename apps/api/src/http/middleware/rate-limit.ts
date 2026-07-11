@@ -1,0 +1,42 @@
+import rateLimit from 'express-rate-limit';
+import type { Request, Response } from 'express';
+import type { ApiErrorBody } from '@pulsechat/shared';
+import { env } from '../../config/env.js';
+
+/**
+ * Per-endpoint-class rate limiting (Requirement Scope §20, Technical Spec §7),
+ * backed by in-process stores. Exposes X-RateLimit-* headers per §21.
+ */
+
+function limitHandler(req: Request, res: Response): void {
+  const body: ApiErrorBody = {
+    error: {
+      code: 'RATE_LIMITED',
+      message: 'Too many requests — slow down and try again shortly',
+      requestId: res.getHeader('X-Request-Id')?.toString(),
+    },
+  };
+  res.status(429).json(body);
+}
+
+function makeLimiter(windowMs: number, limit: number) {
+  return rateLimit({
+    windowMs,
+    limit,
+    standardHeaders: false,
+    legacyHeaders: true, // X-RateLimit-Limit / -Remaining / -Reset
+    handler: limitHandler,
+    // Integration tests hammer endpoints from one IP; brute-force backoff
+    // still covers the login path there.
+    skip: () => env.NODE_ENV === 'test',
+  });
+}
+
+/** Credential-touching endpoints: strict. */
+export const authLimiter = makeLimiter(15 * 60 * 1000, 30);
+
+/** Endpoints that trigger an outbound email: very strict. */
+export const emailLimiter = makeLimiter(15 * 60 * 1000, 8);
+
+/** General authenticated API traffic. */
+export const apiLimiter = makeLimiter(60 * 1000, 300);

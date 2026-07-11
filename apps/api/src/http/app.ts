@@ -1,10 +1,13 @@
+import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express, { type Express } from 'express';
 import { env } from '../config/env.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { notFound } from './middleware/not-found.js';
 import { requestContext } from './middleware/request-context.js';
+import { authRouter } from './routes/auth.routes.js';
 import { healthzRouter } from './routes/healthz.js';
+import { usersRouter } from './routes/users.routes.js';
 
 /**
  * Builds the Express app without binding a port, so tests can exercise it via
@@ -17,9 +20,12 @@ export function createApp(): Express {
   app.use(requestContext);
   app.use(cors({ origin: env.APP_ORIGIN, credentials: true }));
   app.use(express.json({ limit: '1mb' }));
+  app.use(cookieParser());
 
   app.use(healthzRouter);
-  // Feature routers mount here milestone by milestone (auth, users, …).
+  app.use(authRouter);
+  app.use(usersRouter);
+  // Feature routers mount here milestone by milestone (friends, chat, …).
 
   app.use(notFound);
   app.use(errorHandler);
