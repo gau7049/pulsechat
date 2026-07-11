@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Builds
+dist/
+build/
+*.tsbuildinfo
+
+# Environment — real secrets never enter the repo
+.env
+.env.*
+!.env.example
+
+# Test & coverage output
+coverage/
+playwright-report/
+test-results/
+
+# Logs
+*.log
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# Prisma generated client lives in node_modules; keep migrations tracked
