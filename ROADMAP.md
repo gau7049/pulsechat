@@ -172,7 +172,10 @@ Frontend:
 - 24-h statuses (text/photo, visibility, CC0 music, canvas annotation) + expiry sweep job
 - Status/live rail (distinct rings, live first); WebRTC 1:1 calls (STUN→TURN, short-lived coturn
   creds via `TURN_SHARED_SECRET`); mesh live broadcast; active-users counter
-- **Manual step**: user provisions Oracle VM + coturn per `infra/coturn/README.md`
+- Code ships STUN-only-safe: calls work same-network without the TURN VM; TURN just improves
+  reliability across strict NATs once provisioned — build proceeds without blocking on it
+- **Manual (tracked in "Pending manual setup" below, not blocking)**: Oracle VM + coturn provision
+  per `infra/coturn/README.md`; a small CC0 music track set for status backgrounds
 
 ### ⬜ M6 — Posts & feed
 
@@ -206,6 +209,28 @@ Frontend:
 | Cloudinary                     | ✅ working (avatar upload signed path)                                                                                                  |
 | Brevo                          | ⚠️ key in `.env` is an **SMTP** key (`xsmtpsib-`) — REST needs an **API** key (`xkeysib-`); until swapped, emails print to API terminal |
 | VAPID / TURN / deploy accounts | ⬜ not needed until M7 / M5 / deploy                                                                                                    |
+
+## Pending manual setup (owner-tracked, not blocking coding)
+
+Coding for the milestone that needs each of these proceeds without them — STUN-only calling
+and a placeholder track list stand in until the real values arrive. Do these whenever
+convenient; tell the agent the resulting values/files when ready and it will wire them in.
+
+- ⬜ **Oracle Cloud Always-Free VM + coturn** (needed by M5 for reliable WebRTC across strict
+  NATs) — steps in `infra/coturn/README.md`, ~30 min. Produces `TURN_HOST` and
+  `TURN_SHARED_SECRET` for `.env`.
+- ⬜ **CC0 status background music** (needed by M5, Requirement Scope §11) — pick 5–8 short
+  tracks from Free Music Archive / Pixabay Music / Chosic (CC0, no attribution required),
+  drop the files + license info in the repo; agent wires them into the music picker.
+- ⬜ **VAPID keypair** (needed by M7 for Web Push) — `npx web-push generate-vapid-keys`, then
+  `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VITE_VAPID_PUBLIC_KEY` in `.env`.
+- ⬜ **Brevo API key swap** (blocks real email delivery, not local dev — emails currently print
+  to the API terminal) — the `.env` key is an SMTP key (`xsmtpsib-`); the REST API Brevo calls
+  need an API key (`xkeysib-`) from the Brevo dashboard.
+- ⬜ **Real ToS/Privacy Policy copy** (needed by M7 close-out, Requirement Scope §19) — legal
+  content is a human decision; placeholder copy is already live and clearly marked.
+- ⬜ **First deploy accounts** (Vercel, Render, Backblaze B2, UptimeRobot) — needed at actual
+  deploy time, not before, per Build Instructions §4.
 
 ## Working agreements
 
@@ -242,3 +267,8 @@ Frontend:
   All gates green (lint, format, typecheck, 83 tests, both builds). Pending: user browser
   walkthrough of M2+M3+M4, then M5 (status/live/presence — needs the Oracle VM + coturn manual
   step per `infra/coturn/README.md` before WebRTC calling can be tested end to end).
+- **2026-07-12 (later still)** — User confirmed manual setup (Oracle VM/coturn, CC0 music) will
+  happen later, not before M5 coding. Added the "Pending manual setup" section above so every
+  outstanding manual item (M5's two, plus M7's VAPID/legal-copy and deploy-time accounts) is
+  tracked in one place instead of scattered across milestone bullets. M5 build is explicitly
+  spec'd to proceed STUN-only in the meantime. Next session starts M5.
