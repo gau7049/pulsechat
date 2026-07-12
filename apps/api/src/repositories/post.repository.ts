@@ -7,8 +7,28 @@ import { prisma } from '../lib/prisma.js';
  * service layer; this layer only shapes queries (Build Instructions §6).
  */
 
+/**
+ * The only author fields any post-list view ever reads: `toUserSummaryDto`
+ * (id/username/displayName/avatarUrl) plus `visibility` for `assertCanView`'s
+ * gate. Narrowed via `select` rather than `include: true` so hot list
+ * endpoints (feed/hashtag/explore) don't pull every `User` column —
+ * `passwordHash` included — off the wire on every row (§14 "<300ms list
+ * endpoints" perf note).
+ */
+export type AuthorSummary = Pick<
+  User,
+  'id' | 'username' | 'displayName' | 'avatarUrl' | 'visibility'
+>;
+const authorSelect = {
+  id: true,
+  username: true,
+  displayName: true,
+  avatarUrl: true,
+  visibility: true,
+} as const;
+
 export type PostWithMeta = Post & {
-  author: User;
+  author: AuthorSummary;
   hashtags: PostHashtag[];
   likes: Like[];
   saves: Save[];
@@ -16,7 +36,7 @@ export type PostWithMeta = Post & {
 
 /** Viewer-scoped `likes`/`saves` — presence, not the full join table. */
 const metaInclude = (viewerId: string) => ({
-  author: true,
+  author: { select: authorSelect },
   hashtags: true,
   likes: { where: { userId: viewerId } },
   saves: { where: { userId: viewerId } },
@@ -72,7 +92,7 @@ export function listByAuthor(
   });
 }
 
-export type PostWithHashtags = Post & { author: User; hashtags: PostHashtag[] };
+export type PostWithHashtags = Post & { author: AuthorSummary; hashtags: PostHashtag[] };
 
 /**
  * Bounded recency window ranked in-memory by the service (§13.2). Per-viewer
@@ -83,7 +103,7 @@ export type PostWithHashtags = Post & { author: User; hashtags: PostHashtag[] };
 export function findRecentPublic(limit: number): Promise<PostWithHashtags[]> {
   return prisma.post.findMany({
     where: { author: { visibility: 'public' } },
-    include: { author: true, hashtags: true },
+    include: { author: { select: authorSelect }, hashtags: true },
     orderBy: { createdAt: 'desc' },
     take: limit,
   });
@@ -92,7 +112,7 @@ export function findRecentPublic(limit: number): Promise<PostWithHashtags[]> {
 export function findRecentForTag(tag: string, limit: number): Promise<PostWithHashtags[]> {
   return prisma.post.findMany({
     where: { author: { visibility: 'public' }, hashtags: { some: { tag } } },
-    include: { author: true, hashtags: true },
+    include: { author: { select: authorSelect }, hashtags: true },
     orderBy: { createdAt: 'desc' },
     take: limit,
   });

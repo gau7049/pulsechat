@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Avatar } from '../../components/ui/avatar';
+import { Skeleton } from '../../components/ui/skeleton';
 import { useAuth } from '../auth/auth-context';
 import { GoLivePanel } from '../calls/go-live-panel';
 import { LiveViewer } from '../calls/live-viewer';
@@ -37,6 +38,13 @@ export function StatusRail() {
           onPlusClick={() => setComposing(true)}
         />
 
+        {feed.isLoading && (
+          <div aria-hidden className="flex gap-3">
+            <Skeleton className="size-14 shrink-0 rounded-full" />
+            <Skeleton className="size-14 shrink-0 rounded-full" />
+            <Skeleton className="size-14 shrink-0 rounded-full" />
+          </div>
+        )}
         {entries
           .filter((entry) => entry.user.id !== user.id)
           .map((entry) => {

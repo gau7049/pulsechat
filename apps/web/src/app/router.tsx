@@ -1,4 +1,7 @@
 import { createBrowserRouter } from 'react-router-dom';
+import { ConfirmRestorePage, RequestRestorePage } from '../features/account/restore-landing-pages';
+import { AdminPage } from '../features/admin/admin-page';
+import { RequireAdmin } from '../features/admin/admin-guard';
 import { GuestOnly, RequireAuth } from '../features/auth/guards';
 import { LoginPage } from '../features/auth/login-page';
 import { RegisterPage } from '../features/auth/register-page';
@@ -47,6 +50,8 @@ export const router = createBrowserRouter([
       { path: 'reset-password', element: <ResetPasswordPage /> },
       { path: 'terms', element: <TermsPage /> },
       { path: 'privacy', element: <PrivacyPolicyPage /> },
+      { path: 'restore-account', element: <RequestRestorePage /> },
+      { path: 'restore-account/confirm', element: <ConfirmRestorePage /> },
       // Invite landing works signed in or out (§10.3).
       { path: 'invite/:code', element: <InviteLandingPage /> },
       // The home route renders the guest landing when signed out.
@@ -72,6 +77,10 @@ export const router = createBrowserRouter([
               { path: 'p/:id', element: <PostDetailPage /> },
               { path: 'posts/liked', element: <LikedPostsPage /> },
               { path: 'posts/saved', element: <SavedPostsPage /> },
+              {
+                element: <RequireAdmin />,
+                children: [{ path: 'admin/*', element: <AdminPage /> }],
+              },
             ],
           },
         ],

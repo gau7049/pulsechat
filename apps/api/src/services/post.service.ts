@@ -1,4 +1,3 @@
-import type { User } from '@prisma/client';
 import {
   LIMITS,
   computeRankingScore,
@@ -8,9 +7,11 @@ import {
   type PostDto,
 } from '@pulsechat/shared';
 import { AppError } from '../http/errors.js';
+import { cache } from '../lib/cache.js';
 import { logger } from '../lib/logger.js';
 import * as postRepo from '../repositories/post.repository.js';
 import type {
+  AuthorSummary,
   CommentWithUser,
   PostWithHashtags,
   PostWithMeta,
@@ -18,6 +19,7 @@ import type {
 import * as social from '../repositories/social.repository.js';
 import * as users from '../repositories/user.repository.js';
 import { notify } from './notification.service.js';
+import { invalidateProfileCounts } from './social.service.js';
 import { toUserSummaryDto } from './user-summary.serializer.js';
 
 /**
@@ -28,6 +30,38 @@ import { toUserSummaryDto } from './user-summary.serializer.js';
  */
 
 const HASHTAG_PATTERN = /#(\w{1,64})/g;
+
+/**
+ * §13.2/§13.7 hot-read caching (Technical Spec §1). Caches only the
+ * viewer-independent recency *window* the ranking is computed over — never
+ * the finished per-viewer page, which carries likedByMe/savedByMe and would
+ * leak one viewer's state to another if cached. Bounded staleness (a like/
+ * comment landing mid-TTL) is accepted, same trade-off as the ranking
+ * formula itself being "computed at read time" rather than exact.
+ */
+const FEED_CACHE_TTL_SECONDS = 30;
+const exploreWindowKey = 'explore:window';
+const hashtagWindowKey = (tag: string) => `hashtag:${tag}:window`;
+
+function invalidateFeedCache(hashtags: string[]): void {
+  cache.del(exploreWindowKey);
+  for (const tag of hashtags) cache.del(hashtagWindowKey(tag));
+}
+
+/**
+ * A profile-visibility flip changes which window every hashtag/explore
+ * cache entry should contain (§13.3: posts drop out of discovery the moment
+ * their author goes non-public), but the *service* has no per-tag registry
+ * to invalidate selectively — visibility changes are rare enough that
+ * clearing the whole feed-cache namespace is the simple, safe answer rather
+ * than tracking author→tag reverse indexes just for this.
+ */
+export function invalidateAllFeedCaches(): void {
+  cache.del(exploreWindowKey);
+  for (const key of cache.keys()) {
+    if (key.startsWith('hashtag:')) cache.del(key);
+  }
+}
 
 // ── Serialization ────────────────────────────────────────────────────────────
 
@@ -72,7 +106,7 @@ function extractHashtags(caption: string): string[] {
 // ── Visibility (mirrors social.service.ts's getPublicProfile gate) ──────────
 
 /** Invisible posts read as not-found, same as a blocked/private profile (§8, §13.3). */
-async function assertCanView(viewerId: string, author: User): Promise<void> {
+async function assertCanView(viewerId: string, author: AuthorSummary): Promise<void> {
   if (viewerId === author.id) return;
   const block = await social.findBlockBetween(viewerId, author.id);
   if (block) throw new AppError('NOT_FOUND', 'Post not found');
@@ -97,6 +131,8 @@ export async function createPost(authorId: string, body: CreatePostBody): Promis
   });
   logger.info({ event: 'post.created', authorId, postId: created.id }, 'post created');
   const full = await postRepo.findById(created.id, authorId);
+  invalidateFeedCache(hashtags);
+  invalidateProfileCounts(authorId);
   return toPostDto(full!);
 }
 
@@ -107,7 +143,21 @@ export async function deletePost(userId: string, postId: string): Promise<void> 
     throw new AppError('FORBIDDEN', 'Only the author can delete a post');
   }
   await postRepo.deleteById(postId);
+  invalidateFeedCache(post.hashtags.map((h) => h.tag));
+  invalidateProfileCounts(userId);
   logger.info({ event: 'post.deleted', userId, postId }, 'post deleted');
+}
+
+/** §18 admin content removal — skips the owner-only check, reached only from the moderation queue. */
+export async function adminDeletePost(postId: string): Promise<{ authorId: string }> {
+  // No real viewer for an admin action — per-viewer likedByMe/savedByMe are unused here.
+  const post = await postRepo.findById(postId, '');
+  if (!post) throw new AppError('NOT_FOUND', 'Post not found');
+  await postRepo.deleteById(postId);
+  invalidateFeedCache(post.hashtags.map((h) => h.tag));
+  invalidateProfileCounts(post.authorId);
+  logger.info({ event: 'post.admin_deleted', postId }, 'post removed by moderation');
+  return { authorId: post.authorId };
 }
 
 export async function getPost(viewerId: string, postId: string): Promise<PostDto> {
@@ -147,6 +197,8 @@ export async function toggleLike(userId: string, postId: string): Promise<{ like
   if (!post) throw new AppError('NOT_FOUND', 'Post not found');
   await assertCanView(userId, post.author);
   const liked = await postRepo.toggleLike(postId, userId);
+  // A changed like count shifts the ranking score (§13.2) — drop the cached window.
+  invalidateFeedCache(post.hashtags.map((h) => h.tag));
   if (liked && post.authorId !== userId) {
     const liker = await users.findById(userId);
     if (liker) await notify(post.authorId, 'post_like', { from: toUserSummaryDto(liker), postId });
@@ -173,6 +225,8 @@ export async function createComment(
   const commenter = await users.findById(userId);
   if (!commenter) throw new AppError('NOT_FOUND', 'User not found');
   const comment = await postRepo.createComment(postId, userId, body);
+  // A changed comment count shifts the ranking score (§13.2) — drop the cached window.
+  invalidateFeedCache(post.hashtags.map((h) => h.tag));
   if (post.authorId !== userId) {
     await notify(post.authorId, 'post_comment', {
       from: toUserSummaryDto(commenter),
@@ -276,7 +330,12 @@ export async function getHashtagPage(
 ): Promise<Page<PostDto>> {
   const normalized = tag.trim().toLowerCase();
   if (!normalized) throw new AppError('VALIDATION_FAILED', 'Invalid hashtag');
-  const window = await postRepo.findRecentForTag(normalized, LIMITS.FEED_RANKING_WINDOW);
+  const cacheKey = hashtagWindowKey(normalized);
+  let window = cache.get<PostWithHashtags[]>(cacheKey);
+  if (!window) {
+    window = await postRepo.findRecentForTag(normalized, LIMITS.FEED_RANKING_WINDOW);
+    cache.set(cacheKey, window, FEED_CACHE_TTL_SECONDS);
+  }
   return rankedPage(viewerId, window, pagination);
 }
 
@@ -284,6 +343,10 @@ export async function getExploreFeed(
   viewerId: string,
   pagination: { cursor?: string; limit: number },
 ): Promise<Page<PostDto>> {
-  const window = await postRepo.findRecentPublic(LIMITS.FEED_RANKING_WINDOW);
+  let window = cache.get<PostWithHashtags[]>(exploreWindowKey);
+  if (!window) {
+    window = await postRepo.findRecentPublic(LIMITS.FEED_RANKING_WINDOW);
+    cache.set(exploreWindowKey, window, FEED_CACHE_TTL_SECONDS);
+  }
   return rankedPage(viewerId, window, pagination);
 }

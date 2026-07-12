@@ -5,6 +5,8 @@ import { CallOverlay } from '../features/calls/call-overlay';
 import { useCallSocketBridge } from '../features/calls/use-calls';
 import { useAuth } from '../features/auth/auth-context';
 import { useChatSocketBridge, useConversations } from '../features/chat/use-chat';
+import { NotificationBell } from '../features/notifications/notification-bell';
+import { useNotificationSocketBridge } from '../features/notifications/use-notifications';
 import { OnboardingTour } from '../features/onboarding/onboarding-tour';
 import { PostComposer } from '../features/posts/post-composer';
 import { useStatusSocketBridge } from '../features/status/use-status';
@@ -17,6 +19,7 @@ export function AppShell() {
   // One socket-event bridge per signed-in session keeps every cache live.
   useChatSocketBridge(user?.id);
   useStatusSocketBridge(user?.id);
+  useNotificationSocketBridge(user?.id);
   // Mounted here (not per-route) so an incoming call rings on any screen.
   useCallSocketBridge(user?.id);
 
@@ -69,6 +72,19 @@ export function AppShell() {
             >
               Explore
             </NavLink>
+            <NotificationBell />
+            {user.role === 'admin' && (
+              <NavLink
+                to="/admin"
+                className={({ isActive }) =>
+                  `rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                    isActive ? 'bg-accent-soft text-accent-strong' : 'text-fg-muted hover:text-fg'
+                  }`
+                }
+              >
+                Admin
+              </NavLink>
+            )}
             {/* §13.1 "prominent center control" for creating a post. */}
             <button
               type="button"

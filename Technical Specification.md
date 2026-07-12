@@ -256,3 +256,88 @@ Internal implementation order — the release itself ships as one unit (Requirem
 ### 20. Appendix: Seed & Demo Data
 
 `prisma/seed.ts` creates a small connected graph for local dev and demoing: ~15 users across all three privacy levels, friendships, a handful of conversations with sample encrypted messages, a couple of posts per hashtag bucket, and one open report — enough to exercise every screen without hitting free-tier storage limits.
+
+
+## Part VI — Post-Handoff Addendum (Requirement Section 24)
+
+> **Impact note:** these are additive to the M0–M8 build sequence (Section 18). None require a new hosting/service tier beyond what Section 15's directory already covers, except Section 24.3 (two new free public APIs). Recommended slot: a new milestone **M9** after M7, since several items (tagging, notification center, comment likes) touch the Post/Notification schema already stabilized in M6–M7.
+
+### 21. Data Model Additions
+
+| Entity / change | Key fields | Backs requirement |
+|---|---|---|
+| Post.body nullable-media | Post.media_url becomes nullable; caption/body required only when media_url is null | 24.1 Text-only posts |
+| Post.audience | New enum column on Post: everyone / friends / only_me | 24.7 Post share audience |
+| PostTag | post_id, tagged_user_id, created_at | 24.2 Tag people in posts |
+| Comment.like_count / CommentLike | Comment gains like_count; CommentLike(comment_id, user_id, created_at) | 24.6 Comment likes |
+| Notification.type additions | New type values: post_like, post_comment, comment_like, tag, friend_request, new_user_suggestion | 24.5 Notification center, 24.6 |
+| TrendingMovie / TrendingSong (cache tables) | id, source_id, title, image_url, meta_json, preview_url (song only), fetched_at | 24.3 Trending movies & songs — local cache, not queried live from client |
+| PushSubscription.installed_pwa | Boolean flag set when the subscribing client is running in standalone/installed mode | 24.9 PWA — lets notification copy/analytics distinguish installed vs. browser-tab usage |
+
+### 22. Feature Implementation Notes
+
+#### 22.1 Text-Only Posts (24.1)
+
+- POST /posts accepts either media_url or a non-empty caption (zod schema: at least one of the two required) — relaxes the current media-required validation
+- Feed/hashtag/profile-grid rendering adds a text-card layout (no image slot) alongside the existing media-card layout; ranking formula (Section 13.2) is unchanged, just fed a view_count of 0/low-weight for text posts since there's no media impression to count
+
+#### 22.2 Tag People in Posts (24.2)
+
+- Composer's tag picker calls the existing GET /search/users?q= endpoint pre-filtered to the caller's Friendship rows (same friends-only scoping already used by the forward-target picker, Section 14.5) — no new search endpoint needed
+- POST /posts accepts a tagged_user_ids[] array; server inserts PostTag rows and emits a tag Notification per tagged user in the same transaction that creates the post
+- DELETE /posts/:id/tags/me lets a tagged user remove their own tag (author cannot remove another user's tag-removal right)
+- Post detail view renders tagged handles from a join on PostTag, linking to /users/:username
+
+#### 22.3 Trending Movies & Songs (24.3)
+
+| Need | Free source | Notes |
+|---|---|---|
+| Trending movies | TMDB (The Movie Database) API — free API key, no cost tier | GET /trending/movie/day; returns poster path, title, overview |
+| Trending songs | Deezer public API (no key required) or Last.fm free API | Deezer's chart endpoint includes a 30-second preview_url per track, satisfying the inline-preview requirement directly |
+
+- A scheduled job (same GitHub Actions cron mechanism as backups, Section 16) hits both APIs on a fixed interval (e.g. every 6 hours) and upserts results into TrendingMovie/TrendingSong — the app's own API never calls TMDB/Deezer on a user request, so client traffic can't blow the free rate limit
+- GET /discover/movies and GET /discover/songs serve straight from these cache tables — same shape as every other list endpoint (Section 8), cursor-paginated
+- Movie/song detail modal is populated entirely from the cached meta_json, no extra external call on click; song rows render an inline `<audio>` element against preview_url
+- Row placement: its own "Trending" section on the Explore screen, visually separated from the post-ranked Explore feed grid (Section 13.7) so the two ranking systems are never conflated
+
+#### 22.4 WhatsApp-Style Message Reactions (24.4)
+
+- Confirms the existing MessageReaction table (Section 4) as one-row-per-(message_id, user_id) with a unique constraint — a new reaction upserts (replacing emoji) rather than inserting a second row, giving the "one active reaction, re-tap removes it" behavior for free at the DB layer
+- POST /messages/:id/reactions body {emoji}; same route with emoji omitted / DELETE clears the caller's reaction
+- Server emits message:reaction over the existing Socket.IO channel (extends the catalog in Section 9) with the full per-emoji reactor list so all participants' badges/counts update live
+- Quick-reaction bar (long-press/hover) is a client-only UI affordance — no new endpoint; "more emoji" opens the same emoji picker already used for composing
+
+#### 22.5 Notification Center (24.5)
+
+- GET /notifications (already in the API surface, Section 8) becomes the single chronological feed backing this screen — no new endpoint, just new type values (Section 21 table above) and richer payload_json per type (post/comment/profile id to deep-link to)
+- New-user-suggestion notification: on successful registration, a background job compares the new user's contacts-of-friends graph (mutual-friend heuristic, same signal as Section 10.1 suggestions) against existing users and inserts a new_user_suggestion Notification for likely-to-know accounts, with an inline add-friend action that posts directly to POST /friend-requests
+- Unread badge = count of Notification rows with read_at null for the user, pushed live via the existing notification:new socket event
+
+#### 22.6 Comment Likes (24.6)
+
+- POST /comments/:id/like toggles a CommentLike row and increments/decrements Comment.like_count in the same transaction (mirrors the existing Post.like_count pattern, Section 4)
+- Emits a comment_like Notification to the comment's author (skipped when liking your own comment)
+
+#### 22.7 Post Share Audience (24.7)
+
+- Post.audience (Section 21) is set at creation from a required composer field, defaulting to the poster's account-level visibility (Section 8) but overridable per post
+- Every post read path (feed, hashtag page, explore, profile grid) adds audience to its existing visibility filter: everyone → any viewer; friends → viewer must have a Friendship row with the author; only_me → viewer must be the author
+- Hashtag/explore indexing (Section 13.2/13.3) excludes friends and only_me posts at the query level, not just in the UI
+
+#### 22.8 Private-Profile Visit Rules (24.8)
+
+- Profile stats query (post count, friend count — Section 13.4) always runs an unfiltered COUNT, independent of the viewer
+- Profile's post grid query applies the Section 22.7 audience filter as normal — for a non-friend viewer this naturally yields only-everyone posts with no special-casing needed beyond the standard filter already being applied everywhere
+- No caching subtlety here: because the audience filter is applied per-request (Section 14's in-process cache keys are scoped per viewer, not shared across viewers for any audience-gated query), a newly-accepted friend sees Friends-level posts on their very next request
+
+#### 22.9 Installable Web App / PWA (24.9)
+
+- manifest.webmanifest (name, short_name, icons at 192/512px, theme_color, background_color, display: "standalone", start_url) added to apps/web/public, linked from index.html — zero-cost, browser-native install prompt on Android/desktop Chrome/Edge; iOS Safari uses the same manifest plus the standard apple-touch-icon/meta tags for "Add to Home Screen"
+- Builds on the Workbox service worker already required by Section 21 — no second service worker, same install caches app-shell + recently-viewed chat/feed data
+- Web Push (Section 12) is verified explicitly against the installed/standalone context, not just an open browser tab, since iOS Safari historically gates Push API availability behind home-screen installation — this is the reason 24.9 calls out re-testing notifications post-install
+- QA checklist added to Section 19 (Testing Strategy): install on one real Android device and one real iOS device, verify offline shell load, push delivery, camera/attachment picker (Section 10), and touch-target sizing in standalone mode before sign-off — manual step, no paid device-farm service used
+- No separate "installed app" data path: same REST/Socket.IO origin and same JWT/session cookies are used whether launched from the manifest or a browser tab, so state is identical by construction, not by extra sync logic
+
+### 23. Revised Build Sequence (M9)
+
+- **M9 —** text-only posts, post tagging, comment likes, post audience + private-profile visit-rule filtering, notification center consolidation, trending movies/songs (cache job + endpoints + UI), PWA manifest/install/testing pass

@@ -35,5 +35,17 @@ export default tseslint.config(
     files: ['apps/api/**/*.ts', 'prisma/**/*.ts'],
     languageOptions: { globals: globals.node },
   },
+  {
+    // Hand-written Web Push service worker (Technical Spec §12) — runs in the
+    // ServiceWorkerGlobalScope, not the browser window or Node.
+    files: ['apps/web/public/sw.js'],
+    languageOptions: { globals: globals.serviceworker },
+  },
+  {
+    // Artillery load-test config/processor (ROADMAP M8, local-only) — plain
+    // CommonJS Node scripts, not part of any workspace package.
+    files: ['artillery/**/*.js'],
+    languageOptions: { globals: globals.node, sourceType: 'commonjs' },
+  },
   prettier,
 );

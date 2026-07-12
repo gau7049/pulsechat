@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Static list of public, unauthenticated routes only (Requirement Scope §20).
+  Deliberately not a dynamic per-profile/per-post sitemap: crawling individual
+  profiles/posts isn't worth the added complexity of a server-rendered
+  sitemap route at this scale, and could inadvertently list
+  friends/private-visibility usernames if not carefully filtered.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>/</loc></url>
+  <url><loc>/explore</loc></url>
+  <url><loc>/login</loc></url>
+  <url><loc>/register</loc></url>
+  <url><loc>/terms</loc></url>
+  <url><loc>/privacy</loc></url>
+</urlset>

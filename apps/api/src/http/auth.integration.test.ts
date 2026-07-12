@@ -428,3 +428,69 @@ describe('device sessions', () => {
     expect(otherRefresh.status).toBe(401);
   });
 });
+
+describe('account lifecycle (§16)', () => {
+  it('deactivate logs the account out everywhere; logging back in restores it', async () => {
+    const { res, username } = await registerUser();
+    const token = res.body.accessToken as string;
+
+    const deactivated = await request(app)
+      .post('/account/deactivate')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ currentPassword: PASSWORD });
+    expect(deactivated.status).toBe(200);
+    expect((await prisma.user.findUnique({ where: { username } }))?.status).toBe('deactivated');
+
+    const loggedBackIn = await request(app)
+      .post('/auth/login')
+      .send({ username, password: PASSWORD, deviceFingerprint: fp('reactivate') });
+    expect(loggedBackIn.status).toBe(200);
+    expect((await prisma.user.findUnique({ where: { username } }))?.status).toBe('active');
+  });
+
+  it('delete blocks login until the restore-email flow confirms it', async () => {
+    const email = `${uname()}@gmail.com`;
+    const { res, username } = await registerUser({ email });
+    const token = res.body.accessToken as string;
+
+    const deleted = await request(app)
+      .post('/account/delete')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ currentPassword: PASSWORD });
+    expect(deleted.status).toBe(200);
+
+    const blockedLogin = await request(app)
+      .post('/auth/login')
+      .send({ username, password: PASSWORD, deviceFingerprint: fp('after-delete') });
+    expect(blockedLogin.status).toBe(403);
+
+    sentEmails.length = 0;
+    const requested = await request(app).post('/account/restore/request').send({ username });
+    expect(requested.status).toBe(202);
+    const restoreToken = lastEmailToken();
+
+    const confirmed = await request(app)
+      .post('/account/restore/confirm')
+      .send({ token: restoreToken });
+    expect(confirmed.status).toBe(200);
+    expect((await prisma.user.findUnique({ where: { username } }))?.status).toBe('active');
+
+    const allowedLogin = await request(app)
+      .post('/auth/login')
+      .send({ username, password: PASSWORD, deviceFingerprint: fp('restored') });
+    expect(allowedLogin.status).toBe(200);
+  });
+
+  it('exports profile, posts, and message metadata as one JSON payload', async () => {
+    const { res } = await registerUser();
+    const token = res.body.accessToken as string;
+
+    const exported = await request(app)
+      .get('/account/export')
+      .set('Authorization', `Bearer ${token}`);
+    expect(exported.status).toBe(200);
+    expect(exported.body.profile.passwordHash).toBeUndefined();
+    expect(Array.isArray(exported.body.posts)).toBe(true);
+    expect(exported.body.messages.note).toMatch(/end-to-end encrypted/);
+  });
+});

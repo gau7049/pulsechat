@@ -471,4 +471,23 @@ describe('GET /users/:username (public profile)', () => {
     const viewer = await registerUser();
     expect((await asUser(viewer).get('/users/nosuchuser404')).status).toBe(404);
   });
+
+  it('reflects a new post and a new friendship on the very next stat read (M8 caching)', async () => {
+    const alice = await registerUser();
+    const bob = await registerUser();
+
+    // First read populates the profile-counts cache at {posts: 0, friends: 0}.
+    const before = await asUser(alice).get(`/users/${alice.username}`);
+    expect(before.body.stats).toMatchObject({ posts: 0, friends: 0 });
+
+    await asUser(alice).post('/posts', {
+      mediaUrl: 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
+    });
+    const afterPost = await asUser(alice).get(`/users/${alice.username}`);
+    expect(afterPost.body.stats.posts).toBe(1);
+
+    await befriend(alice, bob);
+    const afterFriend = await asUser(alice).get(`/users/${alice.username}`);
+    expect(afterFriend.body.stats.friends).toBe(1);
+  });
 });

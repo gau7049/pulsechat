@@ -16,6 +16,8 @@
     "format:check": "prettier --check .",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "test:load": "pnpm --filter @pulsechat/api exec artillery run ../../artillery/socket-sanity.yml",
+    "test:e2e": "playwright test",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
@@ -23,6 +25,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.30.0",
+    "@playwright/test": "^1.61.1",
     "eslint": "^9.30.0",
     "eslint-config-prettier": "^10.1.0",
     "eslint-plugin-react-hooks": "^5.2.0",
@@ -38,6 +41,7 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@node-rs/argon2": "^2.0.2",
     "@prisma/client": "^6.19.3"
   }
 }

@@ -3,12 +3,14 @@ import { env } from './config/env.js';
 import { createApp } from './http/app.js';
 import { setIo } from './lib/io.js';
 import { logger } from './lib/logger.js';
+import { configureWebPush } from './services/push.service.js';
 import { startExpirySweep } from './services/status.service.js';
 import { attachSockets } from './sockets/index.js';
 
 const httpServer = createServer(createApp());
 setIo(attachSockets(httpServer));
 startExpirySweep();
+configureWebPush();
 
 httpServer.listen(env.PORT, () => {
   logger.info(

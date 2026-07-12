@@ -6,6 +6,7 @@ import { Button } from '../../components/ui/button';
 import { Modal } from '../../components/ui/modal';
 import { ProgressiveImage } from '../../components/ui/progressive-image';
 import { useToast } from '../../components/ui/toast';
+import { ReportModal } from '../reports/report-modal';
 import { PostText } from './post-text';
 import { ShareToChatModal } from './share-to-chat-modal';
 import { useDeletePost, useToggleLike, useToggleSave } from './use-posts';
@@ -18,6 +19,7 @@ export function PostCard({ userId, post }: { userId: string; post: PostDto }) {
   const deletePost = useDeletePost();
   const [sharing, setSharing] = useState<'menu' | 'chat' | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const [heartPop, setHeartPop] = useState(false);
 
   // §13.5 like polish: pop a big heart over the image, Instagram-style,
@@ -58,7 +60,7 @@ export function PostCard({ userId, post }: { userId: string; post: PostDto }) {
           <Avatar name={post.author.displayName} src={post.author.avatarUrl} size="sm" />
           <span className="text-sm font-semibold text-fg">{post.author.displayName}</span>
         </Link>
-        {post.author.id === userId && (
+        {post.author.id === userId ? (
           <button
             type="button"
             aria-label="Delete post"
@@ -68,8 +70,21 @@ export function PostCard({ userId, post }: { userId: string; post: PostDto }) {
           >
             🗑️
           </button>
+        ) : (
+          <button
+            type="button"
+            aria-label="Report post"
+            title="Report post"
+            onClick={() => setReporting(true)}
+            className="ml-auto text-fg-muted hover:text-danger"
+          >
+            🚩
+          </button>
         )}
       </div>
+      {reporting && (
+        <ReportModal targetType="post" targetId={post.id} onClose={() => setReporting(false)} />
+      )}
 
       <div className="relative">
         <Link to={`/p/${post.id}`}>

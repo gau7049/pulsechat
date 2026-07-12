@@ -484,3 +484,80 @@ Feature summary
 ## 23. Open Questions
 
 None remaining. Prior open items are now resolved: login uses magic link (Section 6.2); in-chat search runs client-side over decrypted history to preserve encryption-at-rest (Sections 14.12 & 20); every feature in this document is in scope for the single release (Section 22).
+
+> Part IX — New Requirements (Post-Handoff Addendum)
+
+## 24. New Requirements
+
+> Status: Added after this spec was already forwarded to engineering and build may be underway. Items below are new/changed requirements, not part of the original handoff — flag against in-progress or completed work and confirm impact before implementing.
+
+### 24.1 Text-Only Posts
+
+Attaching a photo or video is not mandatory when creating a post (Section 13.1). A user can publish a post containing text only, with no media attached.
+- Post composer must allow submitting with just a caption/text body and no media selected
+- Text-only posts follow the same visibility, hashtag, ranking, and interaction rules as media posts (Sections 13.2–13.5)
+
+### 24.2 Tag People in Posts
+
+In addition to hashtags (Section 13.1), the post composer offers a tag-people option — distinct from the @mention typed inline in captions/comments (Section 13.8).
+- While creating a post, user can tag one or more other users from a picker (search by username/display name, scoped to friends per Section 15's chat-privacy-style rule — no tagging strangers)
+- Tagged users are notified that they were tagged (ties to Section 17 notifications)
+- Tagged users' names/handles are shown on the post and link to their profiles
+- A tagged user can remove the tag of themself from a post
+
+### 24.3 Trending Movies & Songs (Interactive Discovery Section)
+
+A new discovery section, separate from the Explore/Discover post feed (Section 13.7), surfacing what's currently trending outside the app:
+- Trending Movies — a row/section fetched from a free movie-data API (e.g. a free tier of a public movie database), consistent with the free-tier-only rule in Section 3
+- Trending Songs — a row/section fetched from a free music-data API, similarly free-tier only
+- Both sections are interactive: tapping a movie or song opens more detail (poster/cover, title, brief info); song entries support inline preview playback where the source API provides a preview clip
+- Content refreshes periodically (e.g. cached and re-fetched on a schedule) rather than being fetched live on every page view, to stay within free API rate limits
+- This is discovery/browse content only — it is separate from, and does not affect, the hashtag ranking or post feed algorithms (Section 13.2)
+
+### 24.4 WhatsApp-Style Message Reactions
+
+Expands the existing "message reactions" line item (Section 14.4) into a fully specified requirement, matching common chat-app behavior:
+- Long-press (touch) or hover (desktop) on any message surfaces a quick-reaction bar of a small emoji set, plus a "more emoji" option for the full picker
+- Tapping an emoji attaches that reaction to the message; a user can only have one active reaction per message at a time — picking a new one replaces their previous reaction
+- Reaction picked by user again is removed (toggle off)
+- Reactions render as small emoji badge(s) with a count on the message bubble; tapping the badge shows who reacted with what
+- Reactions sync live to all participants over the socket connection (ties to Section 21.1) and persist in the database as the source of truth
+
+### 24.5 Notification Center
+
+A dedicated notification center (Instagram-style), expanding the notification triggers already listed in Section 17 into one browsable, chronological list.
+- Someone liked your post
+- Someone commented on your post
+- Friend request received (Section 10)
+- New-user suggestion — when a new account joins the platform, existing users are notified it might be someone they know, e.g. "abc just joined — add as friend?", with an inline add-friend action directly from the notification
+- Each entry links to the relevant post, comment, profile, or request
+- Unread/read state per notification, with an unread count badge on the notification center entry point
+
+### 24.6 Comment Likes
+
+Extends Section 13.5 — in addition to liking a post, a user can like an individual comment on a post. Comment like counts show on the comment itself and generate a notification (Section 24.5) to the comment's author.
+
+### 24.7 Post Share Audience
+
+Extends Section 13.1 — when creating a post, the user chooses who can see it:
+- Everyone — visible per the public-discovery rules in Section 13.3
+- Friends — visible only to accepted friends, never in public hashtag/discovery surfaces
+- Only Me — visible only to the poster (e.g. for private journaling/testing before wider sharing)
+- This per-post choice overrides the account-level default implied by the profile's overall privacy level (Section 8) for that individual post
+
+### 24.8 Private-Profile Visit Rules
+
+Clarifies Section 13.3 & 13.4 for non-friend visitors landing on a private profile:
+- Post count and friend count shown on the profile (Section 13.4) are always the real, accurate totals — never hidden or zeroed out for a private profile
+- The posts themselves are gated separately from those counts: a non-friend visitor only sees posts the poster marked Everyone (Section 24.7); posts marked Friends or Only Me stay hidden
+- Once the visitor becomes an accepted friend, all of that user's Friends-level posts become visible to them as well (their Only Me posts remain hidden regardless)
+
+### 24.9 Installable Web App (PWA)
+
+The application must be installable to a phone's home screen and run like a native app, while remaining a single responsive web app (Section 3 — no native App Store/Play Store distribution, no developer-account fees).
+- Web app manifest (app name, icons, theme color, standalone display mode) so browsers offer an "Add to Home Screen" / "Install App" prompt on mobile and desktop
+- Installed app opens full-screen in its own window, with its own home-screen icon and splash screen — no browser address bar/tabs visible
+- Service worker (ties to Section 21's offline-first caching) so the installed app launches and shows recently loaded chats/feed even with no network
+- Push notifications work the same way from the installed app as from the browser tab (Section 17), using the free browser Push API — no paid push service
+- Every feature must be tested and verified on an actual installed mobile instance (Android and iOS home-screen install), not just in a desktop browser tab — install flow, offline behavior, notifications, camera/attachment access (Section 14.8), and layout/touch targets all re-verified in that installed context before sign-off
+- Data stays fully consistent between the installed app and the plain browser tab — same accounts, same database, same real-time socket connection (Section 21.1); there is no separate "app-only" data store, so a message, post, or friend action taken in one shows up identically in the other

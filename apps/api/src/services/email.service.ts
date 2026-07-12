@@ -138,3 +138,17 @@ export function passwordResetEmail(to: string, link: string): EmailMessage {
     actionLabel: 'Reset password',
   };
 }
+
+export function accountRestoreEmail(to: string, link: string): EmailMessage {
+  return {
+    to,
+    subject: 'Restore your PulseChat account',
+    heading: 'Restore your account',
+    bodyLines: [
+      'Tap the button below to restore your deleted PulseChat account. The link works once and expires in 30 minutes.',
+      'After restoring, sign in as usual.',
+    ],
+    actionUrl: link,
+    actionLabel: 'Restore account',
+  };
+}

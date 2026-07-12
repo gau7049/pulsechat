@@ -52,11 +52,36 @@ export function CallOverlay() {
   const accept = useAcceptCall();
   const reject = useRejectCall();
   const end = useEndCall();
+  const primaryButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (state.status === 'ringing-incoming' || state.status === 'ringing-outgoing') {
+      primaryButtonRef.current?.focus();
+    }
+  }, [state.status]);
+
+  useEffect(() => {
+    // Escape only dismisses the ringing states — an in-call hang-up is too
+    // consequential to trigger from a stray Escape press.
+    if (state.status !== 'ringing-incoming' && state.status !== 'ringing-outgoing') return;
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key !== 'Escape') return;
+      if (state.status === 'ringing-incoming') reject();
+      else if (state.status === 'ringing-outgoing') end();
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [state.status, reject, end]);
 
   if (state.status === 'idle') return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-black/80 p-6 text-center text-white">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Call"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-black/80 p-6 text-center text-white"
+    >
       {state.status === 'ringing-incoming' && (
         <>
           <Avatar name={state.otherUser.displayName} src={state.otherUser.avatarUrl} size="lg" />
@@ -70,7 +95,9 @@ export function CallOverlay() {
             <Button variant="danger" onClick={() => reject()}>
               Decline
             </Button>
-            <Button onClick={() => void accept()}>Accept</Button>
+            <Button ref={primaryButtonRef} onClick={() => void accept()}>
+              Accept
+            </Button>
           </div>
         </>
       )}
@@ -82,7 +109,7 @@ export function CallOverlay() {
             <p className="text-lg font-semibold">{state.otherUser.displayName}</p>
             <p className="text-sm text-white/70">Ringing…</p>
           </div>
-          <Button variant="danger" onClick={() => end()}>
+          <Button ref={primaryButtonRef} variant="danger" onClick={() => end()}>
             Cancel
           </Button>
         </>

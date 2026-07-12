@@ -265,3 +265,22 @@ describe('profile posts grid', () => {
     expect(friendView.body.items).toHaveLength(1);
   });
 });
+
+describe('feed caching (§13.2/§13.7, M8)', () => {
+  it('reflects a newly created post on the very next hashtag read', async () => {
+    const author = await registerUser();
+    // A unique tag guarantees this post is the only item in its window,
+    // so the assertion holds regardless of ranking/pagination against
+    // whatever else has accumulated in the shared test DB.
+    const tag = uname('cachetag');
+
+    // First read populates the cache for this (fresh, empty) tag/window.
+    const emptyTagPage = await asUser(author).get(`/hashtags/${tag}`);
+    expect(emptyTagPage.body.items).toHaveLength(0);
+
+    const post = await createPost(author, { caption: `caching check #${tag}` });
+
+    const tagPage = await asUser(author).get(`/hashtags/${tag}`);
+    expect(tagPage.body.items.map((p: { id: string }) => p.id)).toEqual([post.id]);
+  });
+});

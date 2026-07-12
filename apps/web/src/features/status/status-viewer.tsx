@@ -75,10 +75,32 @@ export function StatusViewer({
     }
   }
 
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') onClose();
+      else if (event.key === 'ArrowLeft') goBack();
+      else if (event.key === 'ArrowRight') advance();
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+    // No deps array: goBack/advance close over current index state each
+    // render, so re-binding on every render is intentional.
+  });
+
   if (!person || !status || !user) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-black text-white">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${person.user.displayName}'s status`}
+      className="fixed inset-0 z-50 flex flex-col bg-black text-white"
+    >
       <audio ref={audioRef} hidden />
       <div className="flex gap-1 px-3 pt-3">
         {statuses.map((s, i) => (
@@ -95,6 +117,7 @@ export function StatusViewer({
         <span className="text-sm font-semibold">{person.user.displayName}</span>
         {track && <span className="text-xs text-white/60">🎵 {track.title}</span>}
         <button
+          ref={closeButtonRef}
           type="button"
           aria-label="Close"
           title="Close"

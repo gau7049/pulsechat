@@ -19,10 +19,14 @@ enum UserRole {
 }
 
 /// Soft-delete lifecycle (Requirement Scope §16): deactivated restores on
-/// login; deleted requires the explicit restoration flow. Never hard-erased.
+/// login; deleted requires the explicit restoration flow. suspended is an
+/// admin-only moderation action (§18) — distinct from both so a suspended
+/// user cannot self-service their way back in via login or the restore-email
+/// flow; only `PATCH /admin/users/:id/status` lifts it. Never hard-erased.
 enum UserStatus {
   active
   deactivated
+  suspended
   deleted
 }
 
@@ -136,6 +140,7 @@ enum AuthTokenType {
   otp
   device_confirm
   password_reset
+  account_restore
 }
 
 /// Single-use, short-lived tokens delivered over email (Technical Spec §5).

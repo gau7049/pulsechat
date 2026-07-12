@@ -24,7 +24,18 @@ export function SavedPostsPage() {
       </div>
 
       {query.isLoading && <Skeleton className="h-96 w-full rounded-2xl" aria-hidden />}
-      {!query.isLoading && items.length === 0 && (
+      {query.isError && (
+        <EmptyState
+          icon="⚠️"
+          title="Could not load saved posts"
+          action={
+            <Button variant="secondary" onClick={() => void query.refetch()}>
+              Retry
+            </Button>
+          }
+        />
+      )}
+      {!query.isLoading && !query.isError && items.length === 0 && (
         <EmptyState icon="🔖" title="No saved posts yet" />
       )}
 

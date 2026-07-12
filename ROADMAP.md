@@ -270,32 +270,158 @@ Frontend:
 
 All gates green: lint, format, typecheck, 93 API tests + 17 shared tests, both builds.
 
-### ⬜ M7 — Notifications, account, moderation, admin
+### ✅ M7 — Notifications, account, moderation, admin (DONE — awaiting user browser review)
 
-- In-app notification center + Web Push (VAPID — **manual step**: generate keys)
-- Reports → admin moderation queue (warn/remove/suspend/dismiss); admin route + JWT claim
-- Admin analytics dashboard (Recharts; AnalyticsEvent aggregates only — no chat access)
-- Deactivate (login restores) vs soft-delete (restoration flow); data export; real ToS/Privacy copy
-  (**manual**: user supplies)
+Schema: additive migration `m7_suspended_status_and_restore_token` — `UserStatus` gains `suspended`
+(admin-only moderation lock, distinct from self-service `deactivated`/`deleted` so a suspended user
+can't self-restore via login or the restore-email flow) and `AuthTokenType` gains `account_restore`.
 
-### ⬜ M8 — Non-functional hardening
+Backend (17 new tests across `notifications.integration.test.ts`, `moderation.integration.test.ts`,
+`admin-analytics.integration.test.ts`, plus 3 account-lifecycle cases folded into
+`auth.integration.test.ts`; 112 API tests + 17 shared tests total):
 
-- Rate limiting everywhere + X-RateLimit headers (base exists in `rate-limit.ts`)
-- LRU caching w/ invalidation; Workbox offline service worker; skeleton/empty/error sweep;
-  keyboard/a11y/reduced-motion audit; sitemap/robots; full seed data; Artillery socket sanity;
-  Playwright e2e (signup→friend→chat→post); <300 ms list endpoints
+- `GET /notifications` (cursor), `PATCH /notifications/:id/read`, `POST /notifications/read-all`
+  (§12 "marked read on view" — the bell calls this once on open) — the `notify()` helper that's been
+  writing rows since M2 now also drives this API.
+- `POST/DELETE /push/subscribe` + `push.service.ts` (`web-push` npm) — ships safe without the VAPID
+  manual step (every call no-ops until both keys are set, same pattern M5 used for TURN); `notify()`
+  now also fires a push per call. New-message push is **push-only, no Notification row** — the chat
+  unread badge already covers in-app history, so this exists purely to close the gap for recipients
+  with no live socket (`chat.service.ts` `sendMessage`, tagged by conversationId so the OS collapses
+  repeats instead of stacking one per message).
+- `POST /reports` + admin queue (`GET/PATCH /admin/reports`, `PATCH /admin/users/:id/status`) —
+  action matrix warn/remove/suspend/dismiss; admin list DTO never carries message ciphertext (post
+  reports get a plaintext preview since posts aren't encrypted; message reports get only
+  `{conversationId, sender}`), keeping the "admin cannot read chat content" guarantee literal.
+  `adminDeleteMessage`/`adminDeletePost` reuse the existing tombstone/delete paths minus the
+  sender/owner-only check.
+- `analytics.service.ts` — one instrumentation call site (`track('session_start', ...)` inside
+  `issueSession()`, the single choke point every login/register/magic-link/OTP path already funnels
+  through) drives DAU/WAU + traffic; `GET /admin/analytics/summary` + `/timeseries` bucket in-memory
+  over a capped 90-day window (same "computed at read time" trade-off as M6's ranking). Growth-over-
+  time reads `User.createdAt` directly rather than a redundant signup event.
+- `account.service.ts` — `POST /account/deactivate|delete` (password-confirmed, revokes every
+  session including the current one), `POST /account/restore/request|confirm` (email-token flow,
+  mirrors password-reset), `GET /account/export` (profile + posts + own messages' ciphertext+metadata
+  as one JSON download, with an explicit note that only the original device's key can decrypt the
+  ciphertext — same documented limitation as M3's "no keys on this device" state, not a new one).
+- Bug caught by the new tests and fixed: `auth.service.login()` checked for `deleted` but never
+  `suspended` — a suspended user could log straight back in. Fixed before this milestone shipped.
+
+Frontend:
+
+- `features/notifications/`: bell in the nav (unread badge, same shape as the chats badge),
+  `use-push.ts` (registers `apps/web/public/sw.js` — a minimal hand-written service worker, not
+  Workbox; M8 can extend the same file for offline caching without conflict).
+- `features/admin/`: `/admin` console (JWT-role-gated route, no separate SPA per Technical Spec §1)
+  with a reports queue and a Recharts analytics dashboard (stat tiles + a single-line timeseries,
+  metric/range selectors).
+- `features/reports/`: a reusable report modal wired into the message action menu, post card, and
+  profile page (each non-own target only).
+- Settings gained **Notifications** (push opt-in toggle) and **Account** (export/deactivate/delete,
+  password-confirmed) tabs; guest-accessible `/restore-account` + `/restore-account/confirm` pages
+  mirror the existing email-token landing-page pattern.
+- Legal pages already existed and are linked (M1) — real ToS/Privacy copy stays a tracked manual
+  item, not a coding task.
+
+All gates green: lint, format, typecheck, 112 API tests + 17 shared tests, both builds.
+
+### ✅ M8 — Non-functional hardening (DONE — awaiting user browser review, last milestone)
+
+No schema migration. Ten heterogeneous work-streams; a pre-build survey found rate limiting and
+`prefers-reduced-motion`/focus-visible styling already close to complete, while caching, seed
+content, and e2e/load tooling were genuinely missing (two explicit TODOs sitting unactioned in
+`prisma/seed.ts` since M0).
+
+Two scope decisions made with the user up front: **hand-rolled runtime service-worker caching**
+instead of a `vite-plugin-pwa`/Workbox build pipeline (extends `apps/web/public/sw.js` in place,
+no new build-time dependency); **Playwright + Artillery stay local-only** (npm scripts, not wired
+into GitHub Actions — keeps CI fast, avoids the free tier's 2,000 CI-minutes/month cap on
+live-server-dependent checks).
+
+Backend:
+
+- `reportLimiter` (10/15min) on `POST /reports` — the one real gap found in an otherwise-complete
+  rate-limiting sweep (every other router already had a limiter).
+- In-process caching (`apps/api/src/lib/cache.ts`, `node-cache`, previously unused beyond
+  rate-limit/backoff counters): hashtag/explore feeds cache the **viewer-independent recency
+  window** only (never the finished per-viewer page — that carries likedByMe/savedByMe and would
+  leak one viewer's state to another if cached); profile pages cache **postCount/friendCount**
+  only (the same number for every viewer by construction, unlike relationship/mutualCount which
+  stay live). Invalidated on the writes that actually change either: post create/delete/like/
+  comment, friend accept/remove, block/unblock, and — the bug this caught before it shipped — a
+  **profile visibility change**, which silently kept a just-gone-private post in the cached
+  hashtag window until a test written for this milestone caught it (`invalidateAllFeedCaches()`
+  now clears the whole feed-cache namespace on any visibility flip, since the service has no
+  per-tag reverse index to invalidate selectively and visibility changes are rare enough that the
+  coarser clear is the simpler correct answer).
+- `post.repository.ts`/`social.repository.ts`: the hottest list-endpoint `include`s (`author:
+true`, `userA/userB: true`, `fromUser/toUser: true`) narrowed to `select` — they were pulling
+  every `User` column, `passwordHash` included, off the wire on every row of every feed/friends/
+  requests page for fields nothing ever reads beyond a `UserSummaryDto` (+ `visibility` for the
+  post-visibility gate, + `publicKey` for the friends list).
+- `prisma/seed.ts`: fixed a real pre-existing bug where seed accounts were **permanently
+  unloginable** — `placeholderPasswordHash()` wrote a `seed-placeholder:{sha256}` string that
+  `password.service.ts`'s `verifyPassword` explicitly rejects by design, and the old `upsert`'s
+  empty `update: {}` meant a real Argon2id hash was never applied to already-existing rows even
+  after M1 auth shipped. Every seed account is now genuinely loginable
+  (`{username}-dev-password`). Added ~16 posts across hashtag buckets, likes/comments/saves,
+  3 statuses, one open report, and a couple of notifications — closing the two TODOs left in the
+  file since M0. Conversations/messages are deliberately still not seeded: E2E encryption means
+  there's no way to produce server-side-decryptable ciphertext without the real browser keypair +
+  password-unlock + IndexedDB flow; the new Playwright spec is the honest substitute; a real
+  Node-side idempotency bug (a stray `alreadySeeded` check that scanned _every_ user in the DB,
+  not just the named seed accounts, and got tripped by unrelated manually-created browser-testing
+  accounts) was caught and fixed while wiring this up.
+- `apps/web/public/sw.js` extended in place (still hand-written, not Workbox): `install`/
+  `activate`/`fetch` added alongside the existing M7 push handlers — network-first with an
+  app-shell fallback for navigations, cache-first for Vite's content-hashed `/assets/*`,
+  stale-while-revalidate for everything else same-origin. Never touches cross-origin (API)
+  requests or non-GET.
+- `robots.txt` + a static `sitemap.xml` (public routes only — deliberately not a dynamic
+  per-profile/per-post sitemap, which risked listing friends/private-visibility usernames).
+- `artillery/socket-sanity.yml` (+ `artillery-engine-socketio-v3`): logs in as the seed accounts
+  round-robin, opens a real socket with the resulting JWT, bursts `presence:heartbeat`. Deliberately
+  doesn't simulate paired message-send traffic between virtual users — Artillery VUs are
+  independent by design and reliably pairing two into a shared conversation is a heavier lift than
+  a connection-capacity sanity check warrants. `pnpm test:load`, local-only.
+- `e2e/signup-friend-chat-post.spec.ts` (+ `playwright.config.ts`, root): two real browser
+  contexts drive signup → friend request → accept → an actual encrypted chat message (Bob's
+  browser fetches ciphertext and decrypts it locally — a real proof, not a mock) → post creation,
+  asserted via the profile grid's post-count stat. `pnpm test:e2e`, local-only. Both this and the
+  load test require `TURNSTILE_SECRET`/`VITE_TURNSTILE_SITE_KEY` unset for the run (Playwright/
+  Artillery can't solve a real Turnstile challenge) and a one-time
+  `pnpm exec playwright install chromium`.
+
+Frontend:
+
+- Skeleton/empty/error triad sweep: `notification-bell.tsx` (was plain loading text, no error
+  state), `reports-queue.tsx`, `analytics-dashboard.tsx`, `liked-posts-page.tsx`,
+  `saved-posts-page.tsx`, `status-rail.tsx` — all now use the existing `Skeleton`/`SkeletonRow`/
+  `EmptyState` primitives consistently; no new components.
+- a11y: `CallOverlay` and `StatusViewer` were plain `fixed inset-0` overlays with no keyboard path
+  at all — added `role="dialog"`/`aria-modal`, initial focus on open, and Escape-to-dismiss
+  (scoped to the _ringing_ call states only — an in-call Escape-to-hang-up was judged too
+  consequential for a stray keypress). `Modal` and `ImageAnnotator` (already `Modal`-wrapped) were
+  already correct for free via the native `<dialog>` element's built-in focus trap/Escape.
+  `prefers-reduced-motion` was already global CSS; audited the JS-timed effects (status auto-
+  advance, heart-pop) and found nothing that bypasses it.
+
+All gates green: lint, format, typecheck, 114 API tests + 17 shared tests, both builds. This was
+the last milestone on the roadmap.
 
 ## Environment / provider state
 
 | Item                    | Status                                                                                                                                  |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Supabase `DATABASE_URL` | ✅ in `.env`, migrations applied (`init`, `m1_auth_tokens_and_user_flags`)                                                              |
+| Supabase `DATABASE_URL` | ✅ in `.env`, migrations applied through `m7_suspended_status_and_restore_token`                                                        |
 | JWT secrets             | ✅ dev values in `.env` (regenerate fresh ones in Render at deploy)                                                                     |
 | Turnstile site + secret | ✅ working                                                                                                                              |
 | Cloudinary              | ✅ working (avatar upload signed path)                                                                                                  |
 | Brevo                   | ⚠️ key in `.env` is an **SMTP** key (`xsmtpsib-`) — REST needs an **API** key (`xkeysib-`); until swapped, emails print to API terminal |
 | TURN (coturn)           | ⬜ code ships STUN-only-safe (M5 done); Oracle VM provisioning still pending, see below                                                 |
-| VAPID / deploy accounts | ⬜ not needed until M7 / deploy                                                                                                         |
+| VAPID                   | ⬜ code ships push-ready (M7 done); keys not yet generated — Web Push is a no-op until they land                                        |
+| Deploy accounts         | ⬜ not needed until deploy                                                                                                              |
 
 ## Pending manual setup (owner-tracked, not blocking coding)
 
@@ -320,6 +446,10 @@ convenient; tell the agent the resulting values/files when ready and it will wir
   content is a human decision; placeholder copy is already live and clearly marked.
 - ⬜ **First deploy accounts** (Vercel, Render, Backblaze B2, UptimeRobot) — needed at actual
   deploy time, not before, per Build Instructions §4.
+- ⬜ **Playwright browser binary** (needed once, before the first `pnpm test:e2e`) —
+  `pnpm exec playwright install chromium`. Not run automatically (see M8: build-script approval
+  was deliberately declined for `@playwright/browser-chromium` in `pnpm-workspace.yaml`, so this
+  stays an explicit, deliberate step).
 
 ## Working agreements
 
@@ -330,6 +460,22 @@ convenient; tell the agent the resulting values/files when ready and it will wir
   (covers only the dedicated test schema, per the consented fixed decision above)
 - Every milestone: lint + format:check + typecheck + test + build green, small commits, update
   this file, then **stop for user review**
+- `pnpm test:e2e` (Playwright) and `pnpm test:load` (Artillery) are local-only, manual, not part
+  of the standing gate or CI (M8 decision — keeps CI fast, avoids the free tier's CI-minutes cap
+  on live-server-dependent checks). Both need `TURNSTILE_SECRET`/`VITE_TURNSTILE_SITE_KEY` unset
+  in `.env` for the run — neither tool can solve a real Turnstile challenge.
+- **Root-caused and fixed (M8) a connection-pool exhaustion bug that looked like flaky infra for
+  two whole milestones.** Supabase's pooler caps session-mode clients at 15 total
+  (`FATAL: (EMAXCONNSESSION) ... pool_size: 15`); Prisma's default per-client `connection_limit`
+  (~2×CPU cores+1) can approach that alone, and `vitest.global-setup.ts` gave every test file's own
+  `PrismaClient` no explicit cap — as the suite grew past ~10 files (M7/M8 added several), running
+  the _full_ suite (not a single file) started intermittently exhausting the pool, surfacing as
+  30s test timeouts and stray 500s with no pattern tying them to any specific code change. Fixed by
+  capping `connection_limit=5` on the test `DATABASE_URL` in `vitest.global-setup.ts` — confirmed:
+  114/114 tests green afterward, durations back to single-digit-to-~20s per test, zero flakiness on
+  a full-suite run that previously failed ~19 tests. If a _single_ test file run ever times out
+  again, it's much more likely a real regression now that this is fixed — don't reflexively blame
+  infra.
 
 ## Session log
 
@@ -384,3 +530,40 @@ convenient; tell the agent the resulting values/files when ready and it will wir
   builds). Pending: user browser walkthrough of M2–M6, then M7 (notifications, account,
   moderation, admin — needs the VAPID keypair manual step for Web Push, tracked in "Pending
   manual setup").
+- **2026-07-12 (later still)** — M7 built on user go-ahead (M2–M6 browser review still pending):
+  notification bell + Web Push (ships push-ready without VAPID, same no-op-until-configured
+  pattern as M5's TURN), moderation queue (warn/remove/suspend/dismiss, admin DTO never carries
+  message ciphertext), admin analytics dashboard (Recharts, DAU/WAU from one `session_start`
+  instrumentation point in `issueSession()`), and account deactivate/delete/restore/export. One
+  additive migration (`m7_suspended_status_and_restore_token`) adds a `suspended` UserStatus —
+  deliberately distinct from self-service `deactivated`/`deleted` so an admin suspension can't be
+  undone by the user logging back in or using the restore-email flow. New-message push is
+  push-only (no Notification row) since the chat unread badge already covers that ground — the bell
+  stays scoped to discrete social events. Caught and fixed a real pre-existing bug while writing
+  tests: `auth.service.login()` never actually checked for `suspended` status, so a suspended user
+  could log straight back in. 17 new API tests (notifications, moderation, admin-analytics, plus
+  3 account-lifecycle cases folded into `auth.integration.test.ts`) → 112 API tests, 17 shared
+  tests total. All gates green (lint, format, typecheck, tests, both builds). Pending: user browser
+  walkthrough of M2–M7, then M8 (non-functional hardening — the last milestone).
+- **2026-07-12 (later still)** — M8 built on user go-ahead (M2–M7 browser review still pending):
+  the last milestone — rate-limit audit, in-process feed/profile caching with invalidation,
+  hand-rolled service-worker runtime caching (not Workbox, by explicit user choice), a skeleton/
+  empty/error sweep, an a11y pass on the two overlays that had no keyboard path (`CallOverlay`,
+  `StatusViewer`), robots.txt/sitemap.xml, a real seed-data pass, and local-only Artillery +
+  Playwright tooling (also by explicit user choice — kept out of CI). Caught and fixed two real
+  bugs while building this: (1) profile-visibility changes didn't invalidate the hashtag/explore
+  feed cache, so a post could keep appearing in discovery briefly after its author went
+  non-public — caught by a test written for this milestone, not by the feature working as
+  intended; (2) `prisma/seed.ts`'s seed accounts have been permanently unloginable since M0 (a
+  placeholder password hash `verifyPassword` was always going to reject, and the seed `upsert`'s
+  empty `update: {}` meant even landing real Argon2id hashing in M1 never fixed already-existing
+  rows) — now fixed, every seed account logs in with `{username}-dev-password`. Two new
+  integration tests added (feed-cache and profile-count-cache invalidation) → 114 API tests, 17
+  shared tests total. Also root-caused and fixed the thing that looked like unexplainable Supabase
+  flakiness across this _and_ the M7 session (a socket test timing out at 30 minutes, cascades of
+  unrelated 500s on full-suite runs): Supabase's pooler caps session-mode clients at 15, and
+  `vitest.global-setup.ts` never capped Prisma's own per-client connection limit — added
+  `connection_limit=5` to the test DB URL, confirmed clean on a full 114-test run afterward (see
+  "Working agreements" for the detailed diagnosis). All gates green (lint, format, typecheck,
+  tests, both builds). Pending: user browser walkthrough of the full app (M2–M8) — the last one,
+  since M8 is the final roadmap milestone.

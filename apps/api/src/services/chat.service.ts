@@ -24,6 +24,7 @@ import type {
 } from '../repositories/chat.repository.js';
 import * as social from '../repositories/social.repository.js';
 import { isOnline, lastSeenFor, visiblePresence } from './presence.service.js';
+import { sendPush } from './push.service.js';
 import { toUserSummaryDto } from './user-summary.serializer.js';
 
 /**
@@ -448,6 +449,24 @@ export async function sendMessage(
   const online = recipients.filter((m) => isOnline(m.userId)).map((m) => m.userId);
   await chat.markNotified(message.id, online);
 
+  // Web Push (§12) closes that gap for offline recipients — push-only, no
+  // Notification row: the chat unread badge already covers in-app history,
+  // and the ciphertext body must never appear in the payload.
+  const offline = recipients.filter((m) => !online.includes(m.userId));
+  if (offline.length > 0) {
+    const senderName = sender.user.displayName;
+    void Promise.all(
+      offline.map((m) =>
+        sendPush(m.userId, {
+          title: 'New message',
+          body: `${senderName} sent you a message`,
+          tag: conversation.id,
+          url: `/chats/${conversation.id}`,
+        }),
+      ),
+    );
+  }
+
   const dto = toMessageDto(message);
   const io = getIo();
   for (const member of conversation.members) {
@@ -586,6 +605,29 @@ export async function deleteMessage(
     });
   }
   logger.info({ event: 'chat.message_deleted', messageId, userId, scope }, 'message deleted');
+}
+
+/**
+ * §18 admin content removal — same tombstone as the sender's "everyone"
+ * delete, but reached from the moderation queue so it deliberately skips the
+ * sender-only / membership checks `deleteMessage` enforces for normal users.
+ */
+export async function adminDeleteMessage(
+  messageId: string,
+): Promise<{ conversationId: string; senderId: string }> {
+  const message = await chat.findMessageById(messageId);
+  if (!message) throw new AppError('NOT_FOUND', 'Message not found');
+  const conversation = await chat.getConversation(message.conversationId);
+  if (!conversation) throw new AppError('NOT_FOUND', 'Message not found');
+  if (!message.deletedForEveryoneAt) {
+    await chat.tombstoneMessage(messageId);
+    fanOut(conversation, SERVER_EVENTS.MESSAGE_DELETED, {
+      conversationId: conversation.id,
+      messageId,
+    });
+  }
+  logger.info({ event: 'chat.message_admin_deleted', messageId }, 'message removed by moderation');
+  return { conversationId: conversation.id, senderId: message.senderId };
 }
 
 /** §14.4 reaction toggle; the resulting state is broadcast to members. */

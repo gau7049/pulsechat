@@ -1,0 +1,72 @@
+# Artillery socket sanity check (Technical Spec §14, ROADMAP M8) — a local,
+# manually-run load-test tool, NOT part of CI (see ROADMAP's M8 scope note:
+# both this and the Playwright e2e spec stay local-only to keep CI fast and
+# avoid burning the free-tier's 2,000 CI-minutes/month cap).
+#
+# Precondition: run this against a `pnpm dev` API with TURNSTILE_SECRET
+# temporarily unset in .env — Artillery cannot solve a real Turnstile
+# challenge, and /auth/login gates on one whenever a secret is configured
+# (see `apps/api/src/services/turnstile.service.ts`; unset = dev-mode skip).
+# Also run `pnpm db:seed` first so the accounts below exist.
+#
+# Scope: logs in as the seed accounts (round-robin), opens a real Socket.IO
+# connection with the resulting JWT, and sends a burst of presence
+# heartbeats — sanity-checking the auth+socket-handshake path under
+# concurrent load. It deliberately does NOT simulate real message send/ack
+# traffic between paired virtual users: Artillery VUs are independent by
+# design, and reliably pairing two VUs into a shared conversation is a much
+# heavier lift than a "sanity" check warrants — the existing chat.
+# integration.test.ts + the Playwright e2e spec already cover message-send
+# correctness over a real socket; this script is about connection-handling
+# capacity, not message-flow correctness.
+config:
+  target: 'http://localhost:4000'
+  phases:
+    - duration: 20
+      arrivalRate: 3
+      name: 'Warm up'
+    - duration: 40
+      arrivalRate: 10
+      name: 'Sustained load'
+  engines:
+    socketio-v3: {}
+  processor: './processor.js'
+  variables:
+    username:
+      - aarav
+      - priya
+      - kabir
+      - ananya
+      - dev
+      - meera
+      - rohan
+      - isha
+      - arjun
+      - tara
+      - vivaan
+      - sana
+      - nikhil
+      - zoya
+      - aditya
+
+scenarios:
+  - name: 'Login, connect, heartbeat'
+    engine: socketio-v3
+    flow:
+      - function: 'setAuthVars'
+      - post:
+          url: '/auth/login'
+          json:
+            username: '{{ username }}'
+            password: '{{ password }}'
+            deviceFingerprint: '{{ deviceFingerprint }}'
+          capture:
+            - json: '$.accessToken'
+              as: 'token'
+      - connect:
+          auth:
+            token: '{{ token }}'
+      - loop:
+          - emit: ['presence:heartbeat']
+          - think: 2
+        count: 5

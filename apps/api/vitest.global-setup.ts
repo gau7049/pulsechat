@@ -21,6 +21,16 @@ export default function globalSetup(): void {
   if (!process.env.TEST_DATABASE_URL) {
     url.searchParams.set('schema', 'pulsechat_test');
   }
+  // Supabase's pooler caps session-mode clients at 15 total. Each test file
+  // gets its own PrismaClient (own worker process), and Prisma's default
+  // per-client connection_limit (~2×CPU cores+1) can approach that ceiling
+  // on its own — capping it low here is what actually keeps concurrent test
+  // files from exhausting the shared pool (`fileParallelism: false` avoids
+  // *concurrent* files but doesn't change how many connections one file's
+  // client opens, nor guarantee the previous file's are closed yet).
+  if (!url.searchParams.has('connection_limit')) {
+    url.searchParams.set('connection_limit', '5');
+  }
   const testUrl = url.toString();
 
   execSync('pnpm exec prisma db push --skip-generate --force-reset --accept-data-loss', {

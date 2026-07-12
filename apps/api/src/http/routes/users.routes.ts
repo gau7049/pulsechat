@@ -13,7 +13,7 @@ import { prisma } from '../../lib/prisma.js';
 import * as users from '../../repositories/user.repository.js';
 import { signUpload } from '../../services/cloudinary.service.js';
 import { toMeDto } from '../../services/me.serializer.js';
-import { listUserPosts } from '../../services/post.service.js';
+import { invalidateAllFeedCaches, listUserPosts } from '../../services/post.service.js';
 import { getPublicProfile } from '../../services/social.service.js';
 import { AppError } from '../errors.js';
 import { apiLimiter } from '../middleware/rate-limit.js';
@@ -42,6 +42,9 @@ usersRouter.patch('/users/me', validateBody(updateProfileSchema), async (req, re
     ...('visibility' in body ? { visibility: body.visibility } : {}),
     ...('birthDate' in body ? { birthDate: body.birthDate ? new Date(body.birthDate) : null } : {}),
   });
+  // A visibility flip changes which hashtag/explore window a post belongs
+  // in (§13.3) — the cached windows must not keep serving the old answer.
+  if ('visibility' in body) invalidateAllFeedCaches();
   res.json({ user: toMeDto(updated) });
 });
 

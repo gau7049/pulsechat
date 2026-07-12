@@ -1,6 +1,8 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
+import { AccountSection } from './account-section';
 import { AppearanceSection } from './appearance-section';
 import { BlockedSection } from './blocked-section';
+import { NotificationsSection } from './notifications-section';
 import { PrivacySection } from './privacy-section';
 import { ProfileSection } from './profile-section';
 import { SecuritySection } from './security-section';
@@ -10,7 +12,9 @@ const TABS = [
   { path: 'privacy', label: 'Privacy' },
   { path: 'blocked', label: 'Blocked' },
   { path: 'security', label: 'Security' },
+  { path: 'notifications', label: 'Notifications' },
   { path: 'appearance', label: 'Appearance' },
+  { path: 'account', label: 'Account' },
 ] as const;
 
 /** Settings hub (Requirement Scope §16.1) with per-area sub-routes. */
@@ -45,7 +49,9 @@ export function SettingsPage() {
           <Route path="privacy" element={<PrivacySection />} />
           <Route path="blocked" element={<BlockedSection />} />
           <Route path="security" element={<SecuritySection />} />
+          <Route path="notifications" element={<NotificationsSection />} />
           <Route path="appearance" element={<AppearanceSection />} />
+          <Route path="account" element={<AccountSection />} />
         </Routes>
       </div>
     </main>

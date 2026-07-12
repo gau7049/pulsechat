@@ -30,7 +30,16 @@ export async function friendIds(userId: string): Promise<string[]> {
   return rows.map((r) => (r.userAId === userId ? r.userBId : r.userAId));
 }
 
-export type FriendshipWithUsers = Friendship & { userA: User; userB: User };
+/** Every field `listFriends` (social.service.ts) actually reads off a friend row. */
+const friendSelect = {
+  id: true,
+  username: true,
+  displayName: true,
+  avatarUrl: true,
+  publicKey: true,
+} as const;
+export type FriendUser = Pick<User, 'id' | 'username' | 'displayName' | 'avatarUrl' | 'publicKey'>;
+export type FriendshipWithUsers = Friendship & { userA: FriendUser; userB: FriendUser };
 
 /** One page of a user's friendships, newest first, excluding the given ids. */
 export function listFriendships(
@@ -43,7 +52,7 @@ export function listFriendships(
       userAId: { notIn: options.excludeIds },
       userBId: { notIn: options.excludeIds },
     },
-    include: { userA: true, userB: true },
+    include: { userA: { select: friendSelect }, userB: { select: friendSelect } },
     orderBy: [{ createdAt: 'desc' }, { userAId: 'asc' }, { userBId: 'asc' }],
     take: options.limit,
     ...(options.cursor ? { cursor: { userAId_userBId: options.cursor }, skip: 1 } : {}),
@@ -72,12 +81,15 @@ export function friendshipsOfUsers(
 
 // ── Friend requests ──────────────────────────────────────────────────────────
 
-export type FriendRequestWithUsers = FriendRequest & { fromUser: User; toUser: User };
+/** Every field a friend-request row's `fromUser`/`toUser` is ever read for: a `UserSummaryDto`. */
+const requestUserSelect = { id: true, username: true, displayName: true, avatarUrl: true } as const;
+type RequestUser = Pick<User, 'id' | 'username' | 'displayName' | 'avatarUrl'>;
+export type FriendRequestWithUsers = FriendRequest & { fromUser: RequestUser; toUser: RequestUser };
 
 export function findRequestById(id: string): Promise<FriendRequestWithUsers | null> {
   return prisma.friendRequest.findUnique({
     where: { id },
-    include: { fromUser: true, toUser: true },
+    include: { fromUser: { select: requestUserSelect }, toUser: { select: requestUserSelect } },
   });
 }
 
@@ -108,7 +120,7 @@ export function listPending(
       status: 'pending',
       ...(direction === 'incoming' ? { toUserId: userId } : { fromUserId: userId }),
     },
-    include: { fromUser: true, toUser: true },
+    include: { fromUser: { select: requestUserSelect }, toUser: { select: requestUserSelect } },
     orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
     take: options.limit,
     ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),

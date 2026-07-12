@@ -10,6 +10,7 @@ import {
   type SuggestionDto,
   type UserSearchQuery,
 } from '@pulsechat/shared';
+import { cache } from '../lib/cache.js';
 import { logger } from '../lib/logger.js';
 import * as social from '../repositories/social.repository.js';
 import * as users from '../repositories/user.repository.js';
@@ -24,6 +25,35 @@ import { toUserSummaryDto } from './user-summary.serializer.js';
  */
 
 const SUGGESTION_LIMIT = 10;
+
+/**
+ * Profile stat-count caching (Technical Spec §1). Only postCount/friendCount
+ * are cached — they're the same number for every viewer by construction
+ * (visibility only ever gates *whether* they're shown, never their value),
+ * unlike relationship/canSendRequest/mutualCount, which are per-viewer and
+ * must never be cached. TTL-bounded staleness, invalidated on the writes
+ * that actually change either count.
+ */
+const PROFILE_COUNTS_TTL_SECONDS = 30;
+const profileCountsKey = (userId: string) => `profile-counts:${userId}`;
+
+export function invalidateProfileCounts(userId: string): void {
+  cache.del(profileCountsKey(userId));
+}
+
+async function getProfileCounts(
+  userId: string,
+): Promise<{ postCount: number; friendCount: number }> {
+  const cached = cache.get<{ postCount: number; friendCount: number }>(profileCountsKey(userId));
+  if (cached) return cached;
+  const [postCount, friendCount] = await Promise.all([
+    users.countPosts(userId),
+    social.blockedEitherWayIds(userId).then((blocked) => social.countFriendships(userId, blocked)),
+  ]);
+  const counts = { postCount, friendCount };
+  cache.set(profileCountsKey(userId), counts, PROFILE_COUNTS_TTL_SECONDS);
+  return counts;
+}
 
 // ── Relationship computation ─────────────────────────────────────────────────
 
@@ -231,6 +261,8 @@ export async function respondToRequest(
 
   if (action === 'accept') {
     await social.acceptRequest(request.id, request.fromUserId, request.toUserId);
+    invalidateProfileCounts(request.fromUserId);
+    invalidateProfileCounts(request.toUserId);
     await notify(request.fromUserId, 'friend_accept', {
       from: toUserSummaryDto(request.toUser),
     });
@@ -298,6 +330,8 @@ function decodeFriendCursor(
 export async function removeFriend(userId: string, otherUserId: string): Promise<void> {
   const removed = await social.deleteFriendship(userId, otherUserId);
   if (!removed) throw new AppError('NOT_FOUND', 'You are not friends with this user');
+  invalidateProfileCounts(userId);
+  invalidateProfileCounts(otherUserId);
   logger.info({ event: 'social.friend_removed', userId, otherUserId }, 'friendship removed');
 }
 
@@ -345,12 +379,16 @@ export async function blockUser(blockerId: string, targetId: string): Promise<vo
   const target = await users.findById(targetId);
   if (!target) throw new AppError('NOT_FOUND', 'User not found');
   await social.createBlock(blockerId, targetId);
+  invalidateProfileCounts(blockerId);
+  invalidateProfileCounts(targetId);
   logger.info({ event: 'social.blocked', blockerId, targetId }, 'user blocked');
 }
 
 export async function unblockUser(blockerId: string, targetId: string): Promise<void> {
   const removed = await social.deleteBlock(blockerId, targetId);
   if (!removed) throw new AppError('NOT_FOUND', 'You have not blocked this user');
+  invalidateProfileCounts(blockerId);
+  invalidateProfileCounts(targetId);
   logger.info({ event: 'social.unblocked', blockerId, targetId }, 'user unblocked');
 }
 
@@ -384,18 +422,14 @@ export async function getPublicProfile(
   const info = relationships.get(user.id)!;
   const canSeeDetails = isSelf || user.visibility === 'public' || info.relationship === 'friends';
 
-  const [postCount, friendCount, mutualCounts, pendingSent] = await Promise.all([
-    canSeeDetails ? users.countPosts(user.id) : Promise.resolve(0),
-    canSeeDetails
-      ? social
-          .blockedEitherWayIds(user.id)
-          .then((blocked) => social.countFriendships(user.id, blocked))
-      : Promise.resolve(0),
+  const [counts, mutualCounts, pendingSent] = await Promise.all([
+    canSeeDetails ? getProfileCounts(user.id) : Promise.resolve({ postCount: 0, friendCount: 0 }),
     isSelf
       ? Promise.resolve(new Map<string, number>())
       : social.friendIds(viewerId).then((ids) => mutualCountsFor(ids, [user.id])),
     canSeeDetails ? social.countPendingOutgoing(user.id) : Promise.resolve(0),
   ]);
+  const { postCount, friendCount } = counts;
 
   return {
     user: toUserSummaryDto(user),

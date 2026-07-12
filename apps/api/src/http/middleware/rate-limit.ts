@@ -43,3 +43,6 @@ export const apiLimiter = makeLimiter(60 * 1000, 300);
 
 /** Friend-request sends — its own endpoint class per Technical Spec §7. */
 export const friendRequestLimiter = makeLimiter(15 * 60 * 1000, 30);
+
+/** Report submissions — the generic apiLimiter is far too generous for an abuse-report vector. */
+export const reportLimiter = makeLimiter(15 * 60 * 1000, 10);

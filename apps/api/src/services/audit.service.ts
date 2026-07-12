@@ -18,7 +18,10 @@ export type AuditEvent =
   | 'otp_disabled'
   | 'new_device_pending'
   | 'new_device_confirmed'
-  | 'session_revoked';
+  | 'session_revoked'
+  | 'account_deactivated'
+  | 'account_deleted'
+  | 'account_restored';
 
 export async function recordAudit(
   userId: string,

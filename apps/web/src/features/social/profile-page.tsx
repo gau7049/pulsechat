@@ -11,6 +11,7 @@ import { ApiError } from '../../lib/api';
 import { LiveViewer } from '../calls/live-viewer';
 import { PostThumbnail } from '../posts/post-card';
 import { useUserPosts } from '../posts/use-posts';
+import { ReportModal } from '../reports/report-modal';
 import { StatusViewer } from '../status/status-viewer';
 import { useStatusFeed } from '../status/use-status';
 import { RelationshipButton } from './relationship-button';
@@ -243,6 +244,7 @@ function ProfileActions({
   const block = useBlockUser();
   const unblock = useUnblockUser();
   const [confirming, setConfirming] = useState<'remove' | 'block' | null>(null);
+  const [reporting, setReporting] = useState(false);
 
   function onError(error: unknown) {
     toast(error instanceof ApiError ? error.message : 'Something went wrong', { kind: 'error' });
@@ -284,6 +286,12 @@ function ProfileActions({
       <Button variant="ghost" size="sm" onClick={() => setConfirming('block')}>
         Block
       </Button>
+      <Button variant="ghost" size="sm" onClick={() => setReporting(true)}>
+        Report
+      </Button>
+      {reporting && (
+        <ReportModal targetType="profile" targetId={user.id} onClose={() => setReporting(false)} />
+      )}
 
       <Modal
         open={confirming !== null}

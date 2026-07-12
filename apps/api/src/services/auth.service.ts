@@ -7,6 +7,7 @@ import * as authTokens from '../repositories/auth-token.repository.js';
 import * as devices from '../repositories/device.repository.js';
 import * as users from '../repositories/user.repository.js';
 import type { UserWithPrivacy } from '../repositories/user.repository.js';
+import { track } from './analytics.service.js';
 import { recordAudit } from './audit.service.js';
 import { linkInviteOnRegister } from './invite.service.js';
 import {
@@ -70,6 +71,9 @@ export async function issueSession(
     role: user.role,
     deviceId: device.id,
   });
+  // Single choke point every login/register/magic-link/OTP path funnels
+  // through — one instrumentation call site covers DAU/WAU + traffic (§13).
+  void track('session_start', user.id);
 
   return { user, device, accessToken, refreshToken };
 }
@@ -159,6 +163,11 @@ export async function login(
       'FORBIDDEN',
       'This account was deleted — use account restoration to reclaim it',
     );
+  }
+  if (user.status === 'suspended') {
+    // §18 moderation suspension — unlike deactivated/deleted, there is no
+    // self-service path back; only PATCH /admin/users/:id/status lifts it.
+    throw new AppError('FORBIDDEN', 'This account was suspended by moderation');
   }
   let currentUser = user;
   if (user.status === 'deactivated') {

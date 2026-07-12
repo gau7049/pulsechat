@@ -6,6 +6,7 @@ import { Modal } from '../../components/ui/modal';
 import { Skeleton } from '../../components/ui/skeleton';
 import { useToast } from '../../components/ui/toast';
 import { ApiError } from '../../lib/api';
+import { ReportModal } from '../reports/report-modal';
 import { UserCard } from '../social/user-card';
 import { ackEmitter, getAckVersion, liveAggregate } from './chat-live-store';
 import { LinkifiedText } from './linkified-text';
@@ -427,6 +428,7 @@ function MessageMenu({
   const star = useToggleStar(conversation.id);
   const remove = useDeleteMessage(conversation.id);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [reporting, setReporting] = useState(false);
 
   function onError(error: unknown) {
     toast(error instanceof ApiError ? error.message : 'Something went wrong', { kind: 'error' });
@@ -505,6 +507,15 @@ function MessageMenu({
                 }}
               />
             )}
+            {!own && (
+              <MenuItem
+                label="Report…"
+                onClick={() => {
+                  setReporting(true);
+                  setOpen(false);
+                }}
+              />
+            )}
             <MenuItem
               label="Delete…"
               danger
@@ -555,6 +566,13 @@ function MessageMenu({
             )}
           </div>
         </Modal>
+      )}
+      {reporting && (
+        <ReportModal
+          targetType="message"
+          targetId={message.id}
+          onClose={() => setReporting(false)}
+        />
       )}
     </div>
   );
