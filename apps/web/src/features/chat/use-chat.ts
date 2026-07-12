@@ -20,14 +20,16 @@ import {
   type MessageSyncAck,
   type Page,
   type PresenceUpdatePayload,
+  type StarredMessageDto,
   type TypingEventPayload,
 } from '@pulsechat/shared';
-import { del, get, post } from '../../lib/api';
+import { del, get, patch, post } from '../../lib/api';
 import { getSocket } from '../../lib/socket';
 import { getConversationKey } from './chat-keys';
 import { encryptMessage } from '../../lib/crypto/conversation-keys';
 import * as outbox from './outbox';
 import { getActiveConversation, recordAck, setTyping } from './chat-live-store';
+import { evictDecrypted } from './use-decrypted-message';
 
 /**
  * Server state + live socket reconciliation for chat. React Query holds the
@@ -147,6 +149,44 @@ export function zeroUnread(queryClient: QueryClient, conversationId: string): vo
   );
 }
 
+/** Applies a transform to one message across all cached history pages. */
+function patchMessage(
+  queryClient: QueryClient,
+  conversationId: string,
+  messageId: string,
+  transform: (message: MessageDto) => MessageDto,
+): void {
+  queryClient.setQueryData<MessagesData>(messagesKey(conversationId), (data) =>
+    data
+      ? {
+          ...data,
+          pages: data.pages.map((page) => ({
+            ...page,
+            items: page.items.map((m) => (m.id === messageId ? transform(m) : m)),
+          })),
+        }
+      : data,
+  );
+}
+
+function removeMessageLocal(
+  queryClient: QueryClient,
+  conversationId: string,
+  messageId: string,
+): void {
+  queryClient.setQueryData<MessagesData>(messagesKey(conversationId), (data) =>
+    data
+      ? {
+          ...data,
+          pages: data.pages.map((page) => ({
+            ...page,
+            items: page.items.filter((m) => m.id !== messageId),
+          })),
+        }
+      : data,
+  );
+}
+
 // ── Sending with the offline queue (§21.2) ───────────────────────────────────
 
 async function attemptSend(queryClient: QueryClient, entry: outbox.OutboxEntry): Promise<void> {
@@ -159,6 +199,8 @@ async function attemptSend(queryClient: QueryClient, entry: outbox.OutboxEntry):
       clientUuid: entry.clientUuid,
       ciphertext: entry.ciphertext,
       nonce: entry.nonce,
+      ...(entry.replyToId ? { replyToId: entry.replyToId } : {}),
+      ...(entry.forwardedFromId ? { forwardedFromId: entry.forwardedFromId } : {}),
     })) as MessageSendAck;
     if (ack.ok) {
       outbox.remove(entry.clientUuid);
@@ -175,10 +217,15 @@ async function attemptSend(queryClient: QueryClient, entry: outbox.OutboxEntry):
   }
 }
 
-export function useSendMessage(userId: string, conversation: ConversationDto) {
+/** Encrypt-for-target + enqueue + attempt — shared by the composer and forward. */
+export function useSendToConversation(userId: string) {
   const queryClient = useQueryClient();
   return useCallback(
-    async (plaintext: string) => {
+    async (
+      conversation: ConversationDto,
+      plaintext: string,
+      options: { replyToId?: string; forwardedFromId?: string } = {},
+    ) => {
       const key = await getConversationKey(userId, conversation);
       if (!key) throw new Error('This conversation cannot be decrypted on this device');
       const { ciphertext, nonce } = await encryptMessage(key, plaintext);
@@ -188,12 +235,125 @@ export function useSendMessage(userId: string, conversation: ConversationDto) {
         ciphertext,
         nonce,
         createdAt: new Date().toISOString(),
+        ...options,
       };
       outbox.enqueue(entry);
       void attemptSend(queryClient, { ...entry, status: 'pending' });
     },
-    [queryClient, userId, conversation],
+    [queryClient, userId],
   );
+}
+
+export function useSendMessage(userId: string, conversation: ConversationDto) {
+  const sendTo = useSendToConversation(userId);
+  return useCallback(
+    (plaintext: string, options: { replyToId?: string; forwardedFromId?: string } = {}) =>
+      sendTo(conversation, plaintext, options),
+    [sendTo, conversation],
+  );
+}
+
+// ── Message actions (§14.3–14.6, §14.11) ─────────────────────────────────────
+
+export function useEditMessage(userId: string, conversation: ConversationDto) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { messageId: string; plaintext: string }) => {
+      const key = await getConversationKey(userId, conversation);
+      if (!key) throw new Error('This conversation cannot be decrypted on this device');
+      const { ciphertext, nonce } = await encryptMessage(key, input.plaintext);
+      return patch<{ message: MessageDto }>(`/messages/${input.messageId}`, {
+        ciphertext,
+        nonce,
+      });
+    },
+    onSuccess: ({ message }) => {
+      evictDecrypted(message.id);
+      patchMessage(queryClient, conversation.id, message.id, (old) => ({
+        ...old,
+        ciphertext: message.ciphertext,
+        nonce: message.nonce,
+        editedAt: message.editedAt,
+      }));
+    },
+  });
+}
+
+export function useDeleteMessage(conversationId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { messageId: string; scope: 'me' | 'everyone' }) =>
+      del<{ ok: true }>(`/messages/${input.messageId}?scope=${input.scope}`),
+    onSuccess: (_data, input) => {
+      if (input.scope === 'me') {
+        removeMessageLocal(queryClient, conversationId, input.messageId);
+      } else {
+        evictDecrypted(input.messageId);
+        patchMessage(queryClient, conversationId, input.messageId, (old) => ({
+          ...old,
+          ciphertext: '',
+          nonce: '',
+          reactions: [],
+          deletedForEveryoneAt: new Date().toISOString(),
+        }));
+      }
+    },
+  });
+}
+
+export function useToggleReaction(conversationId: string, userId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { messageId: string; emoji: string }) =>
+      post<{ emoji: string | null }>(`/messages/${input.messageId}/reactions`, {
+        emoji: input.emoji,
+      }),
+    onSuccess: ({ emoji }, input) => {
+      patchMessage(queryClient, conversationId, input.messageId, (old) => ({
+        ...old,
+        reactions: [
+          ...old.reactions.filter((r) => r.userId !== userId),
+          ...(emoji ? [{ userId, emoji }] : []),
+        ],
+      }));
+    },
+  });
+}
+
+export function useToggleStar(conversationId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (messageId: string) => post<{ starred: boolean }>(`/messages/${messageId}/star`),
+    onSuccess: ({ starred }, messageId) => {
+      patchMessage(queryClient, conversationId, messageId, (old) => ({ ...old, starred }));
+      void queryClient.invalidateQueries({ queryKey: ['chat', 'starred'] });
+    },
+  });
+}
+
+export function useStarredMessages() {
+  return useInfiniteQuery({
+    queryKey: ['chat', 'starred'],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      get<Page<StarredMessageDto>>(
+        `/messages/starred${pageParam ? `?cursor=${encodeURIComponent(pageParam)}` : ''}`,
+      ),
+    getNextPageParam: (last) => last.nextCursor,
+  });
+}
+
+export function useConversationSettings(conversationId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (settings: { pinned?: boolean; muted?: boolean; archived?: boolean }) =>
+      patch<{ ok: true }>(`/conversations/${conversationId}`, settings),
+    onSuccess: (_data, settings) => {
+      patchConversations(queryClient, (items) =>
+        items.map((c) => (c.id === conversationId ? { ...c, ...settings } : c)),
+      );
+    },
+  });
 }
 
 export function useRetryMessage() {
@@ -284,6 +444,44 @@ export function useChatSocketBridge(userId: string | undefined): void {
       }
     };
 
+    const onMessageEdited = (message: MessageDto) => {
+      evictDecrypted(message.id);
+      // Keep viewer-local fields (reactions/starred/aggregate) — the event
+      // carries none of them.
+      patchMessage(queryClient, message.conversationId, message.id, (old) => ({
+        ...old,
+        ciphertext: message.ciphertext,
+        nonce: message.nonce,
+        editedAt: message.editedAt,
+      }));
+    };
+
+    const onMessageDeleted = (event: { conversationId: string; messageId: string }) => {
+      evictDecrypted(event.messageId);
+      patchMessage(queryClient, event.conversationId, event.messageId, (old) => ({
+        ...old,
+        ciphertext: '',
+        nonce: '',
+        reactions: [],
+        deletedForEveryoneAt: new Date().toISOString(),
+      }));
+    };
+
+    const onReaction = (event: {
+      conversationId: string;
+      messageId: string;
+      userId: string;
+      emoji: string | null;
+    }) => {
+      patchMessage(queryClient, event.conversationId, event.messageId, (old) => ({
+        ...old,
+        reactions: [
+          ...old.reactions.filter((r) => r.userId !== event.userId),
+          ...(event.emoji ? [{ userId: event.userId, emoji: event.emoji }] : []),
+        ],
+      }));
+    };
+
     const onConnect = () => {
       // §21.2 reconciliation: flush queued sends, then replay sequence gaps.
       for (const entry of outbox.pendingEntries()) {
@@ -314,6 +512,9 @@ export function useChatSocketBridge(userId: string | undefined): void {
     };
 
     socket.on(SERVER_EVENTS.MESSAGE_NEW, onMessageNew);
+    socket.on(SERVER_EVENTS.MESSAGE_EDITED, onMessageEdited);
+    socket.on(SERVER_EVENTS.MESSAGE_DELETED, onMessageDeleted);
+    socket.on(SERVER_EVENTS.MESSAGE_REACTION, onReaction);
     socket.on(SERVER_EVENTS.MESSAGE_STATUS, onMessageStatus);
     socket.on(SERVER_EVENTS.TYPING_UPDATE, onTyping);
     socket.on(SERVER_EVENTS.PRESENCE_UPDATE, onPresence);
@@ -327,6 +528,9 @@ export function useChatSocketBridge(userId: string | undefined): void {
 
     return () => {
       socket.off(SERVER_EVENTS.MESSAGE_NEW, onMessageNew);
+      socket.off(SERVER_EVENTS.MESSAGE_EDITED, onMessageEdited);
+      socket.off(SERVER_EVENTS.MESSAGE_DELETED, onMessageDeleted);
+      socket.off(SERVER_EVENTS.MESSAGE_REACTION, onReaction);
       socket.off(SERVER_EVENTS.MESSAGE_STATUS, onMessageStatus);
       socket.off(SERVER_EVENTS.TYPING_UPDATE, onTyping);
       socket.off(SERVER_EVENTS.PRESENCE_UPDATE, onPresence);

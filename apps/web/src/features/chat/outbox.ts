@@ -11,6 +11,9 @@ export interface OutboxEntry {
   nonce: string;
   createdAt: string;
   status: 'pending' | 'failed';
+  /** §14.5 references, preserved across retries. */
+  replyToId?: string;
+  forwardedFromId?: string;
 }
 
 const STORAGE_KEY = 'pulsechat:outbox';

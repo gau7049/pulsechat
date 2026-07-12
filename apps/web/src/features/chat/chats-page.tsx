@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
 import { EmptyState } from '../../components/ui/empty-state';
 import { Input } from '../../components/ui/input';
@@ -36,9 +36,19 @@ export function ChatsPage() {
       >
         <div className="flex items-center justify-between gap-2 px-4 py-3">
           <h1 className="text-xl font-bold text-fg">Chats</h1>
-          <Button size="sm" onClick={() => setShowNewChat(true)} disabled={keyStatus !== 'ready'}>
-            New chat
-          </Button>
+          <span className="flex items-center gap-1">
+            <Link
+              to="/chats/starred"
+              aria-label="Starred messages"
+              title="Starred messages"
+              className="rounded-lg px-2 py-1.5 text-fg-muted hover:bg-surface-sunken hover:text-fg"
+            >
+              ★
+            </Link>
+            <Button size="sm" onClick={() => setShowNewChat(true)} disabled={keyStatus !== 'ready'}>
+              New chat
+            </Button>
+          </span>
         </div>
 
         {keyStatus === 'locked' && <UnlockPanel unlock={unlock} />}

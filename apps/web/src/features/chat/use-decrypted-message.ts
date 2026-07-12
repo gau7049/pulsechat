@@ -10,6 +10,16 @@ import { getConversationKey, KeysLockedError } from './chat-keys';
 
 const cache = new Map<string, string | null>();
 
+/** Drops one cached plaintext — required after edits and deletions (§14.3). */
+export function evictDecrypted(messageId: string): void {
+  cache.delete(messageId);
+}
+
+/** Synchronous read for already-decrypted messages (in-chat search, §14.12). */
+export function getCachedPlaintext(messageId: string): string | null | undefined {
+  return cache.get(messageId);
+}
+
 export type DecryptState =
   | { state: 'loading' }
   | { state: 'ok'; text: string }
@@ -18,7 +28,8 @@ export type DecryptState =
 
 export function useDecryptedMessage(
   userId: string,
-  conversation: ConversationDto,
+  /** Undefined while the message's own conversation hasn't loaded yet. */
+  conversation: ConversationDto | undefined,
   message: { id: string; ciphertext: string; nonce: string } | null,
 ): DecryptState {
   const [result, setResult] = useState<DecryptState>(() => {
@@ -30,7 +41,7 @@ export function useDecryptedMessage(
   });
 
   useEffect(() => {
-    if (!message) return;
+    if (!message || !conversation) return;
     const cached = cache.get(message.id);
     if (cached !== undefined) {
       setResult(cached === null ? { state: 'unreadable' } : { state: 'ok', text: cached });

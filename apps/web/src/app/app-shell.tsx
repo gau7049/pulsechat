@@ -89,7 +89,9 @@ export function AppShell() {
 /** Chats nav item with the total-unread badge (§14.1), fed by the live cache. */
 function ChatsNavLink() {
   const conversations = useConversations();
-  const unread = conversations.data?.items.reduce((sum, c) => sum + c.unreadCount, 0) ?? 0;
+  // Muted conversations (§14.11) don't demand attention in the nav badge.
+  const unread =
+    conversations.data?.items.reduce((sum, c) => sum + (c.muted ? 0 : c.unreadCount), 0) ?? 0;
   return (
     <NavLink
       to="/chats"
