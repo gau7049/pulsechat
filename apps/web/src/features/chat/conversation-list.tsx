@@ -89,6 +89,8 @@ function previewText(
       return '🎵 Voice message';
     case 'document':
       return `📄 ${envelope.attachment.name}`;
+    case 'post-share':
+      return '📤 Shared post';
   }
 }
 

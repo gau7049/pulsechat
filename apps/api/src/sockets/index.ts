@@ -2,6 +2,7 @@ import type { Server as HttpServer } from 'node:http';
 import { Server as SocketIOServer, type Socket } from 'socket.io';
 import { env } from '../config/env.js';
 import { logger } from '../lib/logger.js';
+import { endLiveIfActive } from '../services/live.service.js';
 import {
   broadcastPresence,
   heartbeat,
@@ -10,6 +11,7 @@ import {
 } from '../services/presence.service.js';
 import { verifyAccessToken } from '../services/token.service.js';
 import { registerChatHandlers } from './chat.handlers.js';
+import { registerRtcHandlers } from './rtc.handlers.js';
 
 /**
  * Attaches Socket.IO to the shared HTTP server (Technical Spec §2: one Node
@@ -48,6 +50,7 @@ export function attachSockets(httpServer: HttpServer): SocketIOServer {
     }
     void heartbeat(socket.data.deviceId as string);
     registerChatHandlers(socket);
+    registerRtcHandlers(socket);
 
     socket.on('disconnect', (reason) => {
       logger.info(
@@ -57,6 +60,8 @@ export function attachSockets(httpServer: HttpServer): SocketIOServer {
       if (socketDisconnected(userId, socket.id)) {
         void heartbeat(socket.data.deviceId as string);
         void broadcastPresence(userId, false);
+        // Fully offline — end any live broadcast rather than leave it dangling.
+        void endLiveIfActive(userId);
       }
     });
   });

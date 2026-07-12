@@ -19,11 +19,14 @@ import { SkeletonRow } from '../../components/ui/skeleton';
 import { useToast } from '../../components/ui/toast';
 import { getSocket } from '../../lib/socket';
 import { useAuth } from '../auth/auth-context';
+import { useStartCall } from '../calls/use-calls';
+import { ImageAnnotator } from '../annotate/image-annotator';
 import { uploadAttachment, type AttachmentKind } from './attachments';
 import { getTypingSnapshot, setActiveConversation, typingEmitter } from './chat-live-store';
 import { conversationTitle, lastSeenLabel, otherMember } from './conversation-utils';
 import { MessageBubble, type BubbleActions } from './message-bubble';
 import { parseEnvelope, serializeEnvelope, type MessageEnvelope } from './message-envelope';
+import { STICKERS } from './stickers';
 import {
   sendAck,
   useConversationSettings,
@@ -44,25 +47,6 @@ import { getWallpaper, setWallpaper, WALLPAPERS } from './wallpaper';
  * attachments/stickers/replies/edits/drafts, in-chat search, wallpaper, and
  * the conversation menu (pin/mute/archive, leave).
  */
-
-const STICKERS = [
-  '😀',
-  '😂',
-  '😍',
-  '😎',
-  '🥳',
-  '😭',
-  '😡',
-  '👍',
-  '👎',
-  '🙏',
-  '💪',
-  '🔥',
-  '❤️',
-  '💯',
-  '🎉',
-  '🐱',
-];
 
 type ComposerMode =
   | { kind: 'normal' }
@@ -306,6 +290,7 @@ function ChatHeader({
   const other = otherMember(conversation, myId);
   const subtitle =
     conversation.type === 'group' ? `${conversation.members.length} members` : lastSeenLabel(other);
+  const startCall = useStartCall();
 
   return (
     <header className="flex items-center gap-3 border-b border-border px-4 py-2.5">
@@ -343,9 +328,32 @@ function ChatHeader({
         </span>
       )}
 
+      {conversation.type === 'direct' && other && (
+        <>
+          <button
+            type="button"
+            aria-label="Start a voice call"
+            title="Voice call"
+            onClick={() => void startCall(other.user, 'audio')}
+            className="rounded-lg px-2 py-1 text-fg-muted hover:bg-surface-sunken hover:text-fg"
+          >
+            📞
+          </button>
+          <button
+            type="button"
+            aria-label="Start a video call"
+            title="Video call"
+            onClick={() => void startCall(other.user, 'video')}
+            className="rounded-lg px-2 py-1 text-fg-muted hover:bg-surface-sunken hover:text-fg"
+          >
+            🎥
+          </button>
+        </>
+      )}
       <button
         type="button"
         aria-label="Search in conversation"
+        title="Search in conversation"
         onClick={onToggleSearch}
         className="rounded-lg px-2 py-1 text-fg-muted hover:bg-surface-sunken hover:text-fg"
       >
@@ -388,6 +396,7 @@ function ConversationMenu({
       <button
         type="button"
         aria-label="Conversation options"
+        title="Conversation options"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
         className="rounded-lg px-2 py-1 text-fg-muted hover:bg-surface-sunken hover:text-fg"
@@ -614,6 +623,7 @@ function Composer({
   const [attaching, setAttaching] = useState(false);
   const [uploading, setUploading] = useState<number | null>(null);
   const [showStickers, setShowStickers] = useState(false);
+  const [annotating, setAnnotating] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingKind = useRef<AttachmentKind>('image');
   const typingUntil = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -693,8 +703,7 @@ function Composer({
     setAttaching(false);
   }
 
-  async function onFileChosen(file: File | undefined): Promise<void> {
-    if (!file) return;
+  async function sendAttachment(file: File): Promise<void> {
     const kind = pendingKind.current;
     try {
       setUploading(0);
@@ -714,8 +723,19 @@ function Composer({
       toast(error instanceof Error ? error.message : 'Upload failed', { kind: 'error' });
     } finally {
       setUploading(null);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
+  }
+
+  function onFileChosen(file: File | undefined): void {
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (!file) return;
+    // §11/§14.4 annotation step — skipped for GIFs, same rule as the
+    // compression skip in uploadAttachment (keeps the animation intact).
+    if (pendingKind.current === 'image' && file.type !== 'image/gif') {
+      setAnnotating(file);
+      return;
+    }
+    void sendAttachment(file);
   }
 
   async function sendSticker(emoji: string): Promise<void> {
@@ -778,6 +798,7 @@ function Composer({
           <button
             type="button"
             aria-label="Attach"
+            title="Attach"
             aria-expanded={attaching}
             onClick={() => setAttaching(!attaching)}
             disabled={uploading !== null || mode.kind === 'edit'}
@@ -811,6 +832,7 @@ function Composer({
           <button
             type="button"
             aria-label="Stickers"
+            title="Stickers"
             aria-expanded={showStickers}
             onClick={() => setShowStickers(!showStickers)}
             disabled={mode.kind === 'edit'}
@@ -880,8 +902,19 @@ function Composer({
         ref={fileInputRef}
         type="file"
         hidden
-        onChange={(e) => void onFileChosen(e.target.files?.[0])}
+        onChange={(e) => onFileChosen(e.target.files?.[0])}
       />
+
+      {annotating && (
+        <ImageAnnotator
+          file={annotating}
+          onDone={(edited) => {
+            setAnnotating(null);
+            void sendAttachment(edited);
+          }}
+          onCancel={() => setAnnotating(null)}
+        />
+      )}
     </form>
   );
 }
@@ -905,6 +938,7 @@ function ContextPreview({ message }: { message: MessageDto }): ReactNode {
   const envelope = parseEnvelope(plaintext);
   if (envelope.type === 'text') return `“${envelope.text.slice(0, 80)}”`;
   if (envelope.type === 'sticker') return `${envelope.emoji} sticker`;
+  if (envelope.type === 'post-share') return '📤 shared post';
   return `📎 ${envelope.type}`;
 }
 

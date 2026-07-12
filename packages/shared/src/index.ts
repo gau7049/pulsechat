@@ -8,3 +8,8 @@ export * from './schemas/profile.js';
 export * from './schemas/social.js';
 export * from './schemas/chat.js';
 export * from './schemas/chat-actions.js';
+export * from './schemas/status.js';
+export * from './schemas/rtc.js';
+export * from './schemas/posts.js';
+export * from './status-music.js';
+export * from './ranking.js';

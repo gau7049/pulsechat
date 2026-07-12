@@ -1,15 +1,24 @@
+import { useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { Avatar } from '../components/ui/avatar';
+import { CallOverlay } from '../features/calls/call-overlay';
+import { useCallSocketBridge } from '../features/calls/use-calls';
 import { useAuth } from '../features/auth/auth-context';
 import { useChatSocketBridge, useConversations } from '../features/chat/use-chat';
 import { OnboardingTour } from '../features/onboarding/onboarding-tour';
+import { PostComposer } from '../features/posts/post-composer';
+import { useStatusSocketBridge } from '../features/status/use-status';
 
 /** Signed-in application chrome: top bar + content outlet. */
 export function AppShell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [composing, setComposing] = useState(false);
   // One socket-event bridge per signed-in session keeps every cache live.
   useChatSocketBridge(user?.id);
+  useStatusSocketBridge(user?.id);
+  // Mounted here (not per-route) so an incoming call rings on any screen.
+  useCallSocketBridge(user?.id);
 
   if (!user) return <Outlet />;
 
@@ -51,6 +60,26 @@ export function AppShell() {
               People
             </NavLink>
             <NavLink
+              to="/explore"
+              className={({ isActive }) =>
+                `rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                  isActive ? 'bg-accent-soft text-accent-strong' : 'text-fg-muted hover:text-fg'
+                }`
+              }
+            >
+              Explore
+            </NavLink>
+            {/* §13.1 "prominent center control" for creating a post. */}
+            <button
+              type="button"
+              title="Create post"
+              aria-label="Create post"
+              onClick={() => setComposing(true)}
+              className="mx-1 flex size-8 shrink-0 items-center justify-center self-center rounded-full bg-accent text-lg leading-none font-bold text-on-accent transition-colors hover:bg-accent-strong"
+            >
+              +
+            </button>
+            <NavLink
               to="/settings"
               className={({ isActive }) =>
                 `rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
@@ -71,7 +100,7 @@ export function AppShell() {
             </button>
           </nav>
 
-          <Link to="/settings" aria-label="Your profile settings">
+          <Link to="/settings" aria-label="Your profile settings" title="Your profile settings">
             <Avatar name={user.displayName} src={user.avatarUrl} size="sm" />
           </Link>
         </div>
@@ -82,6 +111,8 @@ export function AppShell() {
       </div>
 
       {!user.onboardedAt && <OnboardingTour />}
+      <CallOverlay />
+      {composing && <PostComposer onClose={() => setComposing(false)} />}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import type { ApiErrorBody, ErrorCode } from '@pulsechat/shared';
+import type { ApiErrorBody, AuthResultDto, ErrorCode } from '@pulsechat/shared';
 
 /**
  * API client: attaches the in-memory access token, sends cookies (refresh),
@@ -60,27 +60,39 @@ async function rawRequest(
   });
 }
 
-/** Single-flight refresh so parallel 401s trigger one refresh call. */
-let refreshInFlight: Promise<boolean> | null = null;
+/**
+ * Single-flight refresh: every caller in the app — the 401 auto-retry below
+ * and AuthProvider's silent session restore on mount — shares this one
+ * promise. Without that sharing, two near-simultaneous calls (e.g. React
+ * StrictMode double-invoking an effect in dev) each present the same
+ * pre-rotation refresh token; the server's rotation is now a compare-and-
+ * swap, so the loser gets a clean 401 instead of corrupting the session —
+ * but de-duplicating here means there's normally only ever one request.
+ */
+let refreshInFlight: Promise<AuthResultDto | null> | null = null;
 
-async function tryRefresh(): Promise<boolean> {
+export async function refreshSession(): Promise<AuthResultDto | null> {
   refreshInFlight ??= (async () => {
     try {
       const res = await fetch(`${BASE_URL}/auth/refresh`, {
         method: 'POST',
         credentials: 'include',
       });
-      if (!res.ok) return false;
-      const data = (await res.json()) as { accessToken: string };
+      if (!res.ok) return null;
+      const data = (await res.json()) as AuthResultDto;
       accessToken = data.accessToken;
-      return true;
+      return data;
     } catch {
-      return false;
+      return null;
     } finally {
       refreshInFlight = null;
     }
   })();
   return refreshInFlight;
+}
+
+async function tryRefresh(): Promise<boolean> {
+  return (await refreshSession()) !== null;
 }
 
 export async function api<T>(

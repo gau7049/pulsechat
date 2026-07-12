@@ -11,9 +11,18 @@ export const CLIENT_EVENTS = {
   TYPING_START: 'typing:start',
   TYPING_STOP: 'typing:stop',
   PRESENCE_HEARTBEAT: 'presence:heartbeat',
+  /** Bidirectional relay — carries both 1:1 call and live-mesh SDP/ICE (§9, §11). */
   CALL_OFFER: 'call:offer',
   CALL_ANSWER: 'call:answer',
   CALL_ICE_CANDIDATE: 'call:ice-candidate',
+  /** 1:1 call lifecycle (§14.4). */
+  CALL_INVITE: 'call:invite',
+  CALL_ACCEPT: 'call:accept',
+  CALL_REJECT: 'call:reject',
+  CALL_END: 'call:end',
+  /** Live-mesh viewer join/leave (§12). */
+  LIVE_JOIN: 'live:join',
+  LIVE_LEAVE: 'live:leave',
 } as const;
 
 export const SERVER_EVENTS = {
@@ -27,7 +36,16 @@ export const SERVER_EVENTS = {
   TYPING_UPDATE: 'typing:update',
   PRESENCE_UPDATE: 'presence:update',
   NOTIFICATION_NEW: 'notification:new',
+  /** No payload — a "refetch" ping, mirrors client-side query invalidation (§12.2). */
   ACTIVE_COUNT_UPDATE: 'active-count:update',
+  CALL_INCOMING: 'call:incoming',
+  CALL_ACCEPTED: 'call:accepted',
+  CALL_REJECTED: 'call:rejected',
+  CALL_ENDED: 'call:ended',
+  LIVE_STARTED: 'live:started',
+  LIVE_ENDED: 'live:ended',
+  LIVE_VIEWER_JOINED: 'live:viewer-joined',
+  LIVE_VIEWER_LEFT: 'live:viewer-left',
 } as const;
 
 export type ClientEventName = (typeof CLIENT_EVENTS)[keyof typeof CLIENT_EVENTS];

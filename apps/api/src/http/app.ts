@@ -7,9 +7,15 @@ import { notFound } from './middleware/not-found.js';
 import { requestContext } from './middleware/request-context.js';
 import { authRouter } from './routes/auth.routes.js';
 import { chatRouter } from './routes/chat.routes.js';
+import { feedRouter } from './routes/feed.routes.js';
+import { hashtagsRouter } from './routes/hashtags.routes.js';
 import { healthzRouter } from './routes/healthz.js';
 import { invitesRouter } from './routes/invites.routes.js';
+import { postsRouter } from './routes/posts.routes.js';
+import { presenceRouter } from './routes/presence.routes.js';
+import { rtcRouter } from './routes/rtc.routes.js';
 import { socialRouter } from './routes/social.routes.js';
+import { statusRouter } from './routes/status.routes.js';
 import { usersRouter } from './routes/users.routes.js';
 
 /**
@@ -31,7 +37,12 @@ export function createApp(): Express {
   app.use(socialRouter);
   app.use(invitesRouter);
   app.use(chatRouter);
-  // Feature routers mount here milestone by milestone (statuses/posts later).
+  app.use(statusRouter);
+  app.use(presenceRouter);
+  app.use(rtcRouter);
+  app.use(postsRouter);
+  app.use(hashtagsRouter);
+  app.use(feedRouter);
 
   app.use(notFound);
   app.use(errorHandler);

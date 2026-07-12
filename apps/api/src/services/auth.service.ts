@@ -339,7 +339,8 @@ export async function refreshSession(
   rawRefreshToken: string,
   context: RequestContext,
 ): Promise<IssuedSession> {
-  const device = await devices.findActiveByRefreshHash(sha256(rawRefreshToken));
+  const currentHash = sha256(rawRefreshToken);
+  const device = await devices.findActiveByRefreshHash(currentHash);
   if (!device) throw new AppError('UNAUTHORIZED', 'Session expired — sign in again');
 
   const user = await users.findById(device.userId);
@@ -348,7 +349,14 @@ export async function refreshSession(
   }
 
   const { token: refreshToken, tokenHash } = generateRefreshToken();
-  await devices.rotateRefreshToken(device.id, tokenHash);
+  // Compare-and-swap: a concurrent duplicate request for the same (now
+  // stale) token loses cleanly here instead of clobbering the winner's
+  // rotation or getting a false "session expired" for a session that's
+  // actually still fine on the other request.
+  const rotated = await devices.rotateRefreshTokenIfCurrent(device.id, currentHash, tokenHash);
+  if (!rotated) {
+    throw new AppError('UNAUTHORIZED', 'Session expired — sign in again');
+  }
   const accessToken = await signAccessToken({
     sub: user.id,
     role: user.role,

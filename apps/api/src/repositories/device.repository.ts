@@ -42,6 +42,25 @@ export function rotateRefreshToken(deviceId: string, refreshTokenHash: string): 
   });
 }
 
+/**
+ * Atomic compare-and-swap rotation: only succeeds if `currentHash` still
+ * matches what's stored. Closes a race where two concurrent refresh calls
+ * (e.g. React StrictMode's double effect-invocation) both read the same
+ * pre-rotation token — the loser now gets a clean "already rotated" signal
+ * instead of silently overwriting the winner's new token.
+ */
+export async function rotateRefreshTokenIfCurrent(
+  deviceId: string,
+  currentHash: string,
+  newHash: string,
+): Promise<boolean> {
+  const result = await prisma.device.updateMany({
+    where: { id: deviceId, refreshTokenHash: currentHash, revokedAt: null },
+    data: { refreshTokenHash: newHash, lastSeenAt: new Date() },
+  });
+  return result.count > 0;
+}
+
 export function markRecognized(deviceId: string): Promise<Device> {
   return prisma.device.update({ where: { id: deviceId }, data: { recognized: true } });
 }

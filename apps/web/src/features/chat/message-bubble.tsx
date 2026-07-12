@@ -1,4 +1,5 @@
 import { useState, useSyncExternalStore } from 'react';
+import { Link } from 'react-router-dom';
 import type { ConversationDto, MessageDto } from '@pulsechat/shared';
 import { Button } from '../../components/ui/button';
 import { Modal } from '../../components/ui/modal';
@@ -287,6 +288,21 @@ function BubbleContent({
           </span>
         </a>
       );
+    case 'post-share':
+      return (
+        <Link
+          to={`/p/${envelope.post.postId}`}
+          className="block overflow-hidden rounded-lg border border-white/20"
+        >
+          <img src={envelope.post.mediaUrl} alt="" className="max-h-56 w-full object-cover" />
+          <span className="block px-2 py-1.5 text-xs">
+            <span className="font-semibold">{envelope.post.authorDisplayName}</span>
+            {envelope.post.caption && (
+              <span className="mt-0.5 block truncate opacity-80">{envelope.post.caption}</span>
+            )}
+          </span>
+        </Link>
+      );
   }
 }
 
@@ -321,7 +337,9 @@ function ReplyQuote({
         ? envelope.text
         : envelope.type === 'sticker'
           ? `${envelope.emoji} Sticker`
-          : `📎 ${envelope.type}`;
+          : envelope.type === 'post-share'
+            ? '📤 Shared post'
+            : `📎 ${envelope.type}`;
   }
 
   return (
@@ -419,6 +437,7 @@ function MessageMenu({
       <button
         type="button"
         aria-label="Message actions"
+        title="Message actions"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
         className="rounded-full px-1.5 py-0.5 text-sm text-fg-muted opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 hover:bg-surface-sunken"

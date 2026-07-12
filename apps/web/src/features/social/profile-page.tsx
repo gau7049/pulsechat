@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import type { StatusFeedEntryDto, UserSummaryDto } from '@pulsechat/shared';
 import { Avatar } from '../../components/ui/avatar';
 import { Button } from '../../components/ui/button';
 import { EmptyState } from '../../components/ui/empty-state';
@@ -7,6 +8,11 @@ import { Modal } from '../../components/ui/modal';
 import { Skeleton } from '../../components/ui/skeleton';
 import { useToast } from '../../components/ui/toast';
 import { ApiError } from '../../lib/api';
+import { LiveViewer } from '../calls/live-viewer';
+import { PostThumbnail } from '../posts/post-card';
+import { useUserPosts } from '../posts/use-posts';
+import { StatusViewer } from '../status/status-viewer';
+import { useStatusFeed } from '../status/use-status';
 import { RelationshipButton } from './relationship-button';
 import { useBlockUser, usePublicProfile, useRemoveFriend, useUnblockUser } from './use-social';
 
@@ -51,7 +57,7 @@ export function ProfilePage() {
     <main className="mx-auto w-full max-w-3xl px-4 py-8">
       <section className="rounded-2xl border border-border bg-surface-raised p-6">
         <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:items-start sm:text-left">
-          <Avatar name={user.displayName} src={user.avatarUrl} size="xl" />
+          <ProfileAvatar user={user} />
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-2xl font-bold text-fg">{user.displayName}</h1>
             <p className="text-sm text-fg-muted">
@@ -97,7 +103,122 @@ export function ProfilePage() {
           </p>
         )}
       </section>
+
+      {stats && stats.posts > 0 && <ProfilePostsGrid username={user.username} />}
     </main>
+  );
+}
+
+/** §13.4 posts grid — same visibility gate as the profile itself. */
+function ProfilePostsGrid({ username }: { username: string }) {
+  const posts = useUserPosts(username);
+  const items = posts.data?.pages.flatMap((page) => page.items) ?? [];
+  if (items.length === 0) return null;
+
+  return (
+    <div className="mt-4">
+      <div className="grid grid-cols-3 gap-1">
+        {items.map((post) => (
+          <PostThumbnail key={post.id} post={post} />
+        ))}
+      </div>
+      {posts.hasNextPage && (
+        <div className="mt-3 flex justify-center">
+          <Button
+            variant="ghost"
+            size="sm"
+            loading={posts.isFetchingNextPage}
+            onClick={() => void posts.fetchNextPage()}
+          >
+            Show more
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Avatar → big preview modal, with a status/live entry point when the
+ * viewer's feed happens to carry this person (friends + self only, §12.1 —
+ * the profile page never queries someone else's status directly).
+ */
+function ProfileAvatar({ user }: { user: UserSummaryDto }) {
+  const statusFeed = useStatusFeed();
+  const entry: StatusFeedEntryDto | undefined = statusFeed.data?.items.find(
+    (item) => item.user.id === user.id,
+  );
+  const hasStatus = (entry?.statuses.length ?? 0) > 0;
+  const isLive = Boolean(entry?.live);
+
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [viewingStatus, setViewingStatus] = useState(false);
+  const [watchingLive, setWatchingLive] = useState(false);
+
+  const ringClass = isLive
+    ? 'ring-4 ring-danger ring-offset-2 ring-offset-surface'
+    : hasStatus
+      ? 'ring-4 ring-accent ring-offset-2 ring-offset-surface'
+      : '';
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setPreviewOpen(true)}
+        aria-label={`View ${user.displayName}'s profile photo`}
+        title="View profile photo"
+        className={`shrink-0 rounded-full ${ringClass}`}
+      >
+        <Avatar name={user.displayName} src={user.avatarUrl} size="xl" />
+      </button>
+
+      <Modal open={previewOpen} onClose={() => setPreviewOpen(false)} title={user.displayName}>
+        <div className="flex flex-col items-center gap-4">
+          {user.avatarUrl ? (
+            <img
+              src={user.avatarUrl}
+              alt={user.displayName}
+              className="max-h-[70vh] w-full rounded-xl object-contain"
+            />
+          ) : (
+            <Avatar name={user.displayName} size="xl" />
+          )}
+          {(isLive || hasStatus) && (
+            <div className="flex gap-2">
+              {isLive && (
+                <Button
+                  onClick={() => {
+                    setPreviewOpen(false);
+                    setWatchingLive(true);
+                  }}
+                >
+                  🔴 Watch live
+                </Button>
+              )}
+              {hasStatus && (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setPreviewOpen(false);
+                    setViewingStatus(true);
+                  }}
+                >
+                  View status
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {viewingStatus && entry && (
+        <StatusViewer entries={[entry]} startIndex={0} onClose={() => setViewingStatus(false)} />
+      )}
+      {watchingLive && (
+        <LiveViewer broadcasterUserId={user.id} onClose={() => setWatchingLive(false)} />
+      )}
+    </>
   );
 }
 

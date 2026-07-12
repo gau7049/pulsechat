@@ -13,6 +13,15 @@ export interface AttachmentMeta {
   mimeType: string;
 }
 
+/** A denormalized snapshot so the bubble renders without an extra fetch (§13.6). */
+export interface PostSharePreview {
+  postId: string;
+  mediaUrl: string;
+  caption: string | null;
+  authorUsername: string;
+  authorDisplayName: string;
+}
+
 export type MessageEnvelope =
   | { v: 1; type: 'text'; text: string }
   | { v: 1; type: 'sticker'; emoji: string }
@@ -22,7 +31,8 @@ export type MessageEnvelope =
       attachment: AttachmentMeta;
       /** Optional caption. */
       text?: string;
-    };
+    }
+  | { v: 1; type: 'post-share'; post: PostSharePreview };
 
 export function serializeEnvelope(envelope: MessageEnvelope): string {
   return JSON.stringify(envelope);
@@ -35,7 +45,7 @@ export function parseEnvelope(plaintext: string): MessageEnvelope {
       parsed &&
       typeof parsed === 'object' &&
       parsed.v === 1 &&
-      ['text', 'sticker', 'image', 'video', 'audio', 'document'].includes(parsed.type)
+      ['text', 'sticker', 'image', 'video', 'audio', 'document', 'post-share'].includes(parsed.type)
     ) {
       return parsed;
     }

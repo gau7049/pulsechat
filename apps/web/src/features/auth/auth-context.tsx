@@ -9,7 +9,14 @@ import {
   type ReactNode,
 } from 'react';
 import type { AuthResultDto, MeDto } from '@pulsechat/shared';
-import { get, getAccessToken, post, setAccessToken, setSessionExpiredHandler } from '../../lib/api';
+import {
+  get,
+  getAccessToken,
+  post,
+  refreshSession as refreshSessionOnce,
+  setAccessToken,
+  setSessionExpiredHandler,
+} from '../../lib/api';
 import { getDeviceFingerprint } from '../../lib/fingerprint';
 import { generateKeypair, unlockPrivateKey } from '../../lib/crypto/keys';
 import { clearSessionKey, saveSessionKey } from '../../lib/crypto/key-session';
@@ -88,14 +95,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- reconnect only when the account changes
 
   // Silent restore: the httpOnly refresh cookie is the only persisted secret.
+  // Goes through the shared single-flight `refreshSession` so this never
+  // races a concurrent 401 auto-retry (or its own StrictMode double-fire in
+  // dev) into presenting the same pre-rotation token twice.
   useEffect(() => {
     setSessionExpiredHandler(clearSession);
     void (async () => {
       try {
-        const result = await post<AuthResultDto>('/auth/refresh');
-        adoptSession(result);
-      } catch {
-        // No live session — the guest experience is fine.
+        const result = await refreshSessionOnce();
+        if (result) adoptSession(result);
       } finally {
         setRestoring(false);
       }

@@ -1,4 +1,5 @@
 import { useRef, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import type { MeDto, Visibility } from '@pulsechat/shared';
 import { ApiError, patch, post } from '../../lib/api';
 import { Avatar } from '../../components/ui/avatar';
@@ -183,6 +184,16 @@ export function ProfileSection() {
           ))}
         </div>
       </fieldset>
+
+      {/* §13.5 "Settings includes a view" for liked/saved posts. */}
+      <div className="flex gap-4 text-sm">
+        <Link to="/posts/liked" className="font-medium text-accent hover:text-accent-strong">
+          Posts I've liked
+        </Link>
+        <Link to="/posts/saved" className="font-medium text-accent hover:text-accent-strong">
+          Saved posts
+        </Link>
+      </div>
 
       {error && (
         <p role="alert" className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">

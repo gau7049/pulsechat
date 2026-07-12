@@ -111,7 +111,9 @@ function StarredRow({
               ? '🎬 Video'
               : envelope.type === 'audio'
                 ? '🎵 Voice message'
-                : `📄 ${envelope.attachment.name}`;
+                : envelope.type === 'post-share'
+                  ? '📤 Shared post'
+                  : `📄 ${envelope.attachment.name}`;
   }
 
   const inner = (

@@ -190,6 +190,29 @@ describe('token refresh & logout', () => {
     expect(reused.status).toBe(401);
   });
 
+  it('survives two concurrent refresh calls with the same token without corrupting the session', async () => {
+    // Regression: React StrictMode (or any duplicate near-simultaneous call)
+    // can present the same pre-rotation refresh cookie twice. The loser must
+    // get a clean 401 — not silently clobber the winner's rotated token.
+    const { res } = await registerUser();
+    const oldCookie = refreshCookie(res);
+
+    const [first, second] = await Promise.all([
+      request(app).post('/auth/refresh').set('Cookie', oldCookie),
+      request(app).post('/auth/refresh').set('Cookie', oldCookie),
+    ]);
+    const results = [first, second];
+    const succeeded = results.filter((r) => r.status === 200);
+    const failed = results.filter((r) => r.status === 401);
+    expect(succeeded).toHaveLength(1);
+    expect(failed).toHaveLength(1);
+
+    // The winner's new token is still fully valid — the session isn't stuck.
+    const winnerCookie = refreshCookie(succeeded[0]!);
+    const again = await request(app).post('/auth/refresh').set('Cookie', winnerCookie);
+    expect(again.status).toBe(200);
+  });
+
   it('logout revokes the device session', async () => {
     const { res } = await registerUser();
     const cookie = refreshCookie(res);

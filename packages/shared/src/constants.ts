@@ -25,6 +25,12 @@ export const LIMITS = {
   WRAPPED_KEY_MAX_CHARS: 256,
   /** Other members besides the creator. */
   GROUP_MEMBERS_MAX: 49,
+  /** How often the API sweeps expired statuses / abandoned live sessions. */
+  STATUS_EXPIRY_SWEEP_INTERVAL_MS: 15 * 60 * 1000,
+  /** Lifetime of a short-lived coturn REST-API credential (Technical Spec §11). */
+  TURN_CREDENTIAL_TTL_SECONDS: 60 * 60,
+  /** Recent-post window ranked in-memory for hashtag pages / explore (§13.2). */
+  FEED_RANKING_WINDOW: 300,
 } as const;
 
 /**

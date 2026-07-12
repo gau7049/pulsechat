@@ -33,7 +33,7 @@ export function PeoplePage() {
         {TABS.map((tab) => (
           <NavLink
             key={tab.path}
-            to={tab.path}
+            to={`/people/${tab.path}`}
             className={({ isActive }) =>
               `whitespace-nowrap rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
                 isActive ? 'bg-surface-raised text-fg shadow-sm' : 'text-fg-muted hover:text-fg'

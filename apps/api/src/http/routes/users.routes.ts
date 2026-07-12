@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import {
+  postsQuerySchema,
   updatePrivacySchema,
   updateProfileSchema,
   type AuditLogEntryDto,
+  type PaginationQuery,
   type UpdatePrivacyBody,
   type UpdateProfileBody,
 } from '@pulsechat/shared';
@@ -11,11 +13,12 @@ import { prisma } from '../../lib/prisma.js';
 import * as users from '../../repositories/user.repository.js';
 import { signUpload } from '../../services/cloudinary.service.js';
 import { toMeDto } from '../../services/me.serializer.js';
+import { listUserPosts } from '../../services/post.service.js';
 import { getPublicProfile } from '../../services/social.service.js';
 import { AppError } from '../errors.js';
 import { apiLimiter } from '../middleware/rate-limit.js';
 import { requireAuth } from '../middleware/require-auth.js';
-import { validateBody } from '../middleware/validate.js';
+import { param, validateBody, validateQuery } from '../middleware/validate.js';
 
 export const usersRouter: Router = Router();
 
@@ -82,6 +85,12 @@ usersRouter.post('/users/me/onboarded', async (req, res) => {
  */
 usersRouter.get('/users/:username', async (req, res) => {
   res.json(await getPublicProfile(req.auth!.sub, req.params.username));
+});
+
+/** Profile posts grid (§13.4) — same visibility gate as the profile itself. */
+usersRouter.get('/users/:username/posts', validateQuery(postsQuerySchema), async (req, res) => {
+  const query = req.validatedQuery as PaginationQuery;
+  res.json(await listUserPosts(req.auth!.sub, param(req, 'username'), query));
 });
 
 /** Owner-visible security audit log (§20), most recent first. */

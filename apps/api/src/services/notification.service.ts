@@ -9,7 +9,7 @@ import { prisma } from '../lib/prisma.js';
  * (Technical Spec §9). The notification center UI arrives in M7; rows created
  * from M2 onward so history is already there.
  */
-export type NotificationType = 'friend_request' | 'friend_accept';
+export type NotificationType = 'friend_request' | 'friend_accept' | 'post_like' | 'post_comment';
 
 export async function notify(
   userId: string,

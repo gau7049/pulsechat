@@ -16,6 +16,33 @@ export function isOnline(userId: string): boolean {
   return (sockets.get(userId)?.size ?? 0) > 0;
 }
 
+export function onlineUserIds(): string[] {
+  return Array.from(sockets.keys());
+}
+
+/**
+ * §12.2 active-users count. "No One" visibility excludes a user from every
+ * count; the "friends" setting only affects presence UI elsewhere, not this
+ * aggregate. `scope: 'friends'` additionally intersects with the viewer's
+ * own friends (and never counts the viewer themself).
+ */
+export async function activeCount(viewerId: string, scope: 'all' | 'friends'): Promise<number> {
+  let candidateIds = onlineUserIds();
+  if (scope === 'friends') {
+    const friends = new Set(await social.friendIds(viewerId));
+    candidateIds = candidateIds.filter((id) => friends.has(id));
+  }
+  if (candidateIds.length === 0) return 0;
+  const rows = await prisma.privacySetting.findMany({
+    where: { userId: { in: candidateIds } },
+    select: { userId: true, lastSeenVisibility: true },
+  });
+  const hiddenIds = new Set(
+    rows.filter((r) => r.lastSeenVisibility === 'no_one').map((r) => r.userId),
+  );
+  return candidateIds.filter((id) => !hiddenIds.has(id)).length;
+}
+
 /** Latest device activity per user — the §8 "last seen" source. */
 export async function lastSeenFor(userIds: string[]): Promise<Map<string, Date>> {
   if (userIds.length === 0) return new Map();
@@ -101,6 +128,14 @@ export async function broadcastPresence(userId: string, online: boolean): Promis
     const friends = await social.friendIds(userId);
     for (const friendId of friends) {
       io.to(`user:${friendId}`).emit(SERVER_EVENTS.PRESENCE_UPDATE, payload);
+    }
+
+    // §12.2: a "refetch" ping, not a computed number — mirrors client-side
+    // query invalidation. Global count changed for everyone; the friends
+    // count only changed for this user's friends.
+    io.emit(SERVER_EVENTS.ACTIVE_COUNT_UPDATE, { scope: 'all' });
+    for (const friendId of friends) {
+      io.to(`user:${friendId}`).emit(SERVER_EVENTS.ACTIVE_COUNT_UPDATE, { scope: 'friends' });
     }
     logger.debug({ event: 'presence.broadcast', userId, online }, 'presence update');
   } catch (error) {

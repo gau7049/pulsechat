@@ -7,6 +7,7 @@ export type Visibility = z.infer<typeof visibilityEnum>;
 
 export const lastSeenVisibilityEnum = z.enum(['everyone', 'friends', 'no_one']);
 export const statusVisibilityEnum = z.enum(['everyone', 'friends']);
+export type StatusVisibility = z.infer<typeof statusVisibilityEnum>;
 
 /** PATCH /users/me (Requirement Scope §7 optional fields). */
 export const updateProfileSchema = z
