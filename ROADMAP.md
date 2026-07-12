@@ -120,15 +120,54 @@ Frontend:
 - Offline outbox (§21.2): encrypted entries persisted in localStorage, flushed on reconnect,
   then `message:sync` patches React Query caches in place (`use-chat.ts` socket bridge)
 
-### ⬜ M4 — Messaging polish (NEXT)
+### ✅ M4 — Messaging polish (DONE — awaiting user browser review)
 
-- Edit/delete (for me / for everyone) live; reactions; GIFs/stickers; big single emoji
-- Reply-to with scroll-to-original; forward (friends-only picker); starred messages view
-- Attachments end-to-end (document/image/video/audio/camera, client compression, 10 MB cap)
-- Link-safety interstitial; pin/mute/archive; per-conversation drafts; client-side in-chat search;
-  chat wallpaper
+Schema: additive `message_hides` table (per-viewer "delete for me" hide, doesn't touch the
+row anyone else sees) — migration `m4_message_hides`, no data loss.
 
-### ⬜ M5 — Status, live, presence
+Backend (8 tests in `apps/api/src/http/chat-actions.integration.test.ts`; 71 API tests total):
+
+- Edit (`PATCH /messages/:id`, sender-only, not on tombstones) — re-encrypted ciphertext,
+  `editedAt`, live `message:edited`
+- Delete: `?scope=me` inserts a `MessageHide` row (history + unread queries exclude hidden
+  rows for that viewer only); `?scope=everyone` (sender-only) tombstones the row — drops
+  ciphertext, sets `deletedForEveryoneAt`, live `message:deleted`; edit/react on a tombstone
+  → 409
+- Reactions: toggle semantics (same emoji removes, different replaces — one row per user by
+  PK), rides on `MessageDto.reactions`, live `message:reaction`
+- Stars: private per-user toggle, `GET /messages/starred` (cursor, each row labelled with its
+  conversation's display name) — never visible to anyone else
+- Reply/forward: `message:send` now accepts `replyToId` (must be in the same conversation)
+  and `forwardedFromId` (sender must actually be a member of that message's conversation —
+  forwarding is bounded by the friendship-gate, never an arbitrary-user picker per §14.5)
+- `PATCH /conversations/:id` pin/mute/archive — per-member flags on `ConversationDto`, never
+  affects other members' view of the same conversation
+- Signed attachment-upload tokens (image/video/raw) reusing the Cloudinary signing scheme
+  from avatars (§10, §14.8) — bytes never touch the API server
+
+Frontend:
+
+- `message-envelope.ts`: versioned JSON payload _inside_ the AES ciphertext (text / sticker /
+  image / video / audio / document) — server stays opaque to it; legacy M3 plain-text
+  messages still parse as `{type:'text'}`, so no back-compat break
+- `attachments.ts`: client-side image compression (skips GIFs to keep animation), 10 MB cap
+  enforced pre-upload, direct-to-Cloudinary with progress
+- Bubble rewrite: typed rendering per envelope kind, big single-emoji display, §14.7
+  link-safety interstitial (never navigates directly), reaction chips, reply quote
+  (click → scroll+highlight original), "Forwarded" badge, per-message action menu
+  (react/reply/forward/star/edit/delete-for-me-or-everyone with a confirm modal)
+- Composer: attachment picker (document/image/video/audio/camera), sticker tray, reply/edit
+  modes, §14.11 auto-saved per-conversation drafts (localStorage)
+- §14.12 in-chat search runs client-side over already-decrypted cached plaintext only — never
+  asks the server to search ciphertext
+- Conversation header menu: pin/mute/archive/leave + wallpaper picker (§14.9, device-local
+  choice); conversation list groups pinned first, collapses archived, shows a muted icon and
+  excludes muted chats from the nav unread badge
+- Dedicated `/chats/starred` view (§14.6), cross-conversation, links back to the original chat
+- Forward picker reuses the user's own conversations — friends-only by construction, since
+  every conversation is already friendship-gated
+
+### ⬜ M5 — Status, live, presence (NEXT)
 
 - 24-h statuses (text/photo, visibility, CC0 music, canvas annotation) + expiry sweep job
 - Status/live rail (distinct rings, live first); WebRTC 1:1 calls (STUN→TURN, short-lived coturn
@@ -194,3 +233,12 @@ Frontend:
   device-bound (spec §6) — new devices show a "no keys here" state; session cache of the unlocked
   key lives in IndexedDB, cleared on logout. Pending: user browser walkthrough of M2+M3 (two
   browsers/accounts for live chat), then M4.
+- **2026-07-12 (later still)** — M4 built on user go-ahead (M2/M3 browser review still pending):
+  messaging polish — edit/delete (both scopes), reactions, reply/forward, starred messages,
+  attachments, link safety, pin/mute/archive, drafts, in-chat search, wallpaper. One additive
+  migration (`message_hides`). 8 new API tests → 71 total. Model switched mid-session
+  (Fable 5 → Sonnet 5) after hitting a usage limit; picked up cleanly from the in-progress
+  `chat-window.tsx` rewrite (fixed one bad emoji literal introduced right before the switch).
+  All gates green (lint, format, typecheck, 83 tests, both builds). Pending: user browser
+  walkthrough of M2+M3+M4, then M5 (status/live/presence — needs the Oracle VM + coturn manual
+  step per `infra/coturn/README.md` before WebRTC calling can be tested end to end).
