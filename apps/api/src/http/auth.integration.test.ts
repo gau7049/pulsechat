@@ -403,7 +403,7 @@ describe('password change', () => {
 });
 
 describe('device sessions', () => {
-  it('lists active sessions and revokes one remotely', async () => {
+  it('lists active sessions and revokes one remotely (step-up required)', async () => {
     const { res, username } = await registerUser();
     const token = res.body.accessToken as string;
 
@@ -419,9 +419,23 @@ describe('device sessions', () => {
     const other = list.body.items.find((d: { current: boolean }) => !d.current);
     expect(current).toBeTruthy();
 
-    const revoked = await request(app)
+    // §6.2 — revoking a session is step-up gated; no header at all is rejected.
+    const withoutStepUp = await request(app)
       .delete(`/auth/devices/${other.id}`)
       .set('Authorization', `Bearer ${token}`);
+    expect(withoutStepUp.status).toBe(403);
+    expect(withoutStepUp.body.error.code).toBe('STEP_UP_REQUIRED');
+
+    const stepUp = await request(app)
+      .post('/auth/step-up')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ password: PASSWORD });
+    expect(stepUp.status).toBe(200);
+
+    const revoked = await request(app)
+      .delete(`/auth/devices/${other.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('x-step-up-token', stepUp.body.stepUpToken as string);
     expect(revoked.status).toBe(200);
 
     const otherRefresh = await request(app).post('/auth/refresh').set('Cookie', secondCookie);

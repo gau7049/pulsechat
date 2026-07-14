@@ -9,6 +9,7 @@ import { accountRouter } from './routes/account.routes.js';
 import { adminRouter } from './routes/admin.routes.js';
 import { authRouter } from './routes/auth.routes.js';
 import { chatRouter } from './routes/chat.routes.js';
+import { discoverRouter } from './routes/discover.routes.js';
 import { feedRouter } from './routes/feed.routes.js';
 import { hashtagsRouter } from './routes/hashtags.routes.js';
 import { healthzRouter } from './routes/healthz.js';
@@ -49,6 +50,7 @@ export function createApp(): Express {
   app.use(postsRouter);
   app.use(hashtagsRouter);
   app.use(feedRouter);
+  app.use(discoverRouter);
   app.use(reportsRouter);
   app.use(adminRouter);
 

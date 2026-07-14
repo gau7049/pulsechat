@@ -1,4 +1,4 @@
-import type { Block, FriendRequest, Friendship, User } from '@prisma/client';
+import type { Block, CloseFriend, FriendRequest, Friendship, User } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 
 /**
@@ -28,6 +28,11 @@ export async function friendIds(userId: string): Promise<string[]> {
     select: { userAId: true, userBId: true },
   });
   return rows.map((r) => (r.userAId === userId ? r.userBId : r.userAId));
+}
+
+/** Every friendship — small at product scale, same trade-off as `friendIds`; feeds the §24.14 sweep. */
+export function allFriendships(): Promise<Friendship[]> {
+  return prisma.friendship.findMany();
 }
 
 /** Every field `listFriends` (social.service.ts) actually reads off a friend row. */
@@ -241,4 +246,55 @@ export function createBlock(blockerId: string, blockedId: string): Promise<void>
 export async function deleteBlock(blockerId: string, blockedId: string): Promise<boolean> {
   const result = await prisma.block.deleteMany({ where: { blockerId, blockedId } });
   return result.count > 0;
+}
+
+// ── Close friends (§24.12) ───────────────────────────────────────────────────
+
+export type CloseFriendWithUser = CloseFriend & { friend: User };
+
+export function listCloseFriends(ownerId: string): Promise<CloseFriendWithUser[]> {
+  return prisma.closeFriend.findMany({
+    where: { ownerId },
+    include: { friend: true },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
+/** Every close-friend id of one owner — used by the status audience check. */
+export async function closeFriendIds(ownerId: string): Promise<string[]> {
+  const rows = await prisma.closeFriend.findMany({
+    where: { ownerId },
+    select: { friendId: true },
+  });
+  return rows.map((r) => r.friendId);
+}
+
+export function addCloseFriend(ownerId: string, friendId: string): Promise<CloseFriend> {
+  return prisma.closeFriend.upsert({
+    where: { ownerId_friendId: { ownerId, friendId } },
+    create: { ownerId, friendId },
+    update: {},
+  });
+}
+
+export async function removeCloseFriend(ownerId: string, friendId: string): Promise<boolean> {
+  const result = await prisma.closeFriend.deleteMany({ where: { ownerId, friendId } });
+  return result.count > 0;
+}
+
+/**
+ * Of the given authors, which ones have `viewerId` on *their* close-friends
+ * list — the reverse direction from `closeFriendIds` (used by the status/live
+ * audience check, batched across a whole feed instead of one query per row).
+ */
+export async function authorsWhoCloseFriended(
+  viewerId: string,
+  authorIds: string[],
+): Promise<string[]> {
+  if (authorIds.length === 0) return [];
+  const rows = await prisma.closeFriend.findMany({
+    where: { friendId: viewerId, ownerId: { in: authorIds } },
+    select: { ownerId: true },
+  });
+  return rows.map((r) => r.ownerId);
 }

@@ -5,9 +5,12 @@ import {
   type CreateStatusBody,
   type LiveActiveEntryDto,
   type LiveSessionDto,
+  type ReactToStatusBody,
+  type RespondToPollBody,
   type StartLiveBody,
   type StatusDto,
   type StatusFeedEntryDto,
+  type StatusPollResultsDto,
 } from '@pulsechat/shared';
 import { del, get, post } from '../../lib/api';
 import { getSocket } from '../../lib/socket';
@@ -58,6 +61,35 @@ export function useEndLive() {
   return useMutation({
     mutationFn: () => post<{ ok: true }>('/live/end'),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: feedKey }),
+  });
+}
+
+// ── Reactions (§24.10) + polls/questions (§24.13) ────────────────────────────
+
+export function useReactToStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { statusId: string; body: ReactToStatusBody }) =>
+      post<{ emoji: string | null }>(`/statuses/${input.statusId}/react`, input.body),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: feedKey }),
+  });
+}
+
+export function useRespondToPoll() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { statusId: string; body: RespondToPollBody }) =>
+      post<{ ok: true }>(`/statuses/${input.statusId}/poll/respond`, input.body),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: feedKey }),
+  });
+}
+
+/** Author-only aggregate — fetched on demand when the author opens the results view. */
+export function usePollResults(statusId: string | null) {
+  return useQuery({
+    queryKey: ['status', 'poll-results', statusId],
+    enabled: statusId !== null,
+    queryFn: () => get<StatusPollResultsDto>(`/statuses/${statusId}/poll/results`),
   });
 }
 

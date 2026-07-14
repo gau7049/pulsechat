@@ -4,13 +4,14 @@ import { Button } from '../../components/ui/button';
 import { EmptyState } from '../../components/ui/empty-state';
 import { useToast } from '../../components/ui/toast';
 import { PostText } from './post-text';
-import { useComments, useCreateComment } from './use-posts';
+import { useComments, useCreateComment, useToggleCommentLike } from './use-posts';
 
-/** Comment thread + composer for a single post (§13.5). */
+/** Comment thread + composer for a single post (§13.5, comment likes §24.6). */
 export function CommentsPanel({ postId }: { postId: string }) {
   const { toast } = useToast();
   const comments = useComments(postId);
   const createComment = useCreateComment(postId);
+  const toggleLike = useToggleCommentLike();
   const [draft, setDraft] = useState('');
 
   const items = comments.data?.pages.flatMap((page) => page.items) ?? [];
@@ -47,7 +48,18 @@ export function CommentsPanel({ postId }: { postId: string }) {
               <span className="font-semibold">{comment.user.displayName} </span>
               <PostText text={comment.body} />
             </p>
-            <p className="text-xs text-fg-muted">{new Date(comment.createdAt).toLocaleString()}</p>
+            <p className="flex items-center gap-2 text-xs text-fg-muted">
+              {new Date(comment.createdAt).toLocaleString()}
+              <button
+                type="button"
+                aria-label={comment.likedByMe ? 'Unlike comment' : 'Like comment'}
+                onClick={() => toggleLike.mutate(comment.id)}
+                className={comment.likedByMe ? 'font-semibold text-danger' : 'hover:text-fg'}
+              >
+                {comment.likedByMe ? '❤️' : '🤍'}
+                {comment.likeCount > 0 && ` ${comment.likeCount}`}
+              </button>
+            </p>
           </div>
         </div>
       ))}

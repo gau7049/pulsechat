@@ -9,6 +9,7 @@ import { Switch } from '../../components/ui/switch';
 import { useToast } from '../../components/ui/toast';
 import { useAuth } from '../auth/auth-context';
 import { PasswordStrengthMeter } from '../auth/password-strength-meter';
+import { runWithStepUp, useStepUp } from '../auth/step-up-context';
 
 function ChangePasswordForm() {
   const { toast } = useToast();
@@ -122,12 +123,20 @@ function EmailBlock() {
 function TwoFactorBlock() {
   const { user, setUser } = useAuth();
   const { toast } = useToast();
+  const requestStepUp = useStepUp();
   if (!user) return null;
 
   async function toggle(enable: boolean) {
     try {
-      const { user: updated } = await post<{ user: MeDto }>(
-        enable ? '/auth/otp/enable' : '/auth/otp/disable',
+      // §6.2 — disabling 2FA is step-up gated; enabling isn't sensitive the same way.
+      const { user: updated } = await runWithStepUp(
+        (stepUpToken) =>
+          post<{ user: MeDto }>(
+            enable ? '/auth/otp/enable' : '/auth/otp/disable',
+            undefined,
+            stepUpToken ? { stepUpToken } : undefined,
+          ),
+        requestStepUp,
       );
       setUser(updated);
       toast(enable ? 'Two-factor login enabled' : 'Two-factor login disabled', {
@@ -156,6 +165,7 @@ function TwoFactorBlock() {
 function SessionsBlock() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const requestStepUp = useStepUp();
   const { data, isPending } = useQuery({
     queryKey: ['devices'],
     queryFn: () => get<{ items: DeviceDto[] }>('/auth/devices'),
@@ -163,7 +173,11 @@ function SessionsBlock() {
 
   async function revoke(id: string) {
     try {
-      await del(`/auth/devices/${id}`);
+      // §6.2 — revoking a session remotely is step-up gated.
+      await runWithStepUp(
+        (stepUpToken) => del(`/auth/devices/${id}`, stepUpToken ? { stepUpToken } : undefined),
+        requestStepUp,
+      );
       await queryClient.invalidateQueries({ queryKey: ['devices'] });
       toast('Session signed out', { kind: 'success' });
     } catch {
@@ -265,6 +279,11 @@ export function SecuritySection() {
         <h3 id="sec-sessions" className="mb-1 text-sm font-semibold text-fg">
           Active sessions
         </h3>
+        <p className="mb-3 text-xs text-fg-muted">
+          Checking "Remember me" at sign-in keeps a session for 30 days; leaving it unchecked signs
+          you out when you close your browser. Revoking a session here requires re-entering your
+          password.
+        </p>
         <SessionsBlock />
       </section>
       <section aria-labelledby="sec-audit">

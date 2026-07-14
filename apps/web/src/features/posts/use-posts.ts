@@ -99,6 +99,15 @@ export function useToggleLike() {
   });
 }
 
+/** §24.2 — a tagged user removes their own tag; the author cannot remove it for them. */
+export function useRemoveMyTag() {
+  const invalidate = useInvalidatePosts();
+  return useMutation({
+    mutationFn: (postId: string) => del<{ ok: true }>(`/posts/${postId}/tags/me`),
+    onSuccess: invalidate,
+  });
+}
+
 export function useToggleSave() {
   const invalidate = useInvalidatePosts();
   return useMutation({
@@ -112,6 +121,19 @@ export function useCreateComment(postId: string) {
   return useMutation({
     mutationFn: (body: string) =>
       httpPost<{ comment: CommentDto }>(`/posts/${postId}/comments`, { body }),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * §24.6 — refetch-on-write, same simpler pattern as every other post
+ * mutation here. Invalidating the `['posts']` family already covers
+ * `keys.comments(postId)`, which is prefixed under it.
+ */
+export function useToggleCommentLike() {
+  const invalidate = useInvalidatePosts();
+  return useMutation({
+    mutationFn: (commentId: string) => httpPost<{ liked: boolean }>(`/comments/${commentId}/like`),
     onSuccess: invalidate,
   });
 }

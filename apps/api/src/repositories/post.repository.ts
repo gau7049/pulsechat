@@ -1,4 +1,14 @@
-import type { Comment, Like, Post, PostHashtag, Save, User } from '@prisma/client';
+import type {
+  Comment,
+  CommentLike,
+  Like,
+  Post,
+  PostAudience,
+  PostHashtag,
+  PostTag,
+  Save,
+  User,
+} from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 
 /**
@@ -27,9 +37,12 @@ const authorSelect = {
   visibility: true,
 } as const;
 
+export type TagWithUser = PostTag & { taggedUser: AuthorSummary };
+
 export type PostWithMeta = Post & {
   author: AuthorSummary;
   hashtags: PostHashtag[];
+  tags: TagWithUser[];
   likes: Like[];
   saves: Save[];
 };
@@ -38,6 +51,7 @@ export type PostWithMeta = Post & {
 const metaInclude = (viewerId: string) => ({
   author: { select: authorSelect },
   hashtags: true,
+  tags: { include: { taggedUser: { select: authorSelect } } },
   likes: { where: { userId: viewerId } },
   saves: { where: { userId: viewerId } },
 });
@@ -46,23 +60,37 @@ const metaInclude = (viewerId: string) => ({
 
 export function create(input: {
   authorId: string;
-  mediaUrl: string;
+  /** §24.1 — nullable now that a post may be caption-only. */
+  mediaUrl?: string;
   caption?: string;
+  audience: PostAudience;
   /** Already lowercased; empty when the author isn't a public profile (§13.1). */
   hashtags: string[];
+  /** Already verified as friends of the author by the service (§24.2). */
+  taggedUserIds: string[];
 }): Promise<Post> {
   return prisma.post.create({
     data: {
       authorId: input.authorId,
-      mediaUrl: input.mediaUrl,
+      mediaUrl: input.mediaUrl ?? null,
       caption: input.caption ?? null,
+      audience: input.audience,
       hashtags: {
         create: input.hashtags.map((tag) => ({
           hashtag: { connectOrCreate: { where: { tag }, create: { tag } } },
         })),
       },
+      tags: {
+        create: input.taggedUserIds.map((taggedUserId) => ({ taggedUserId })),
+      },
     },
   });
+}
+
+/** §24.2 self-removal of a tag — returns false if the caller wasn't tagged. */
+export async function deleteTag(postId: string, taggedUserId: string): Promise<boolean> {
+  const result = await prisma.postTag.deleteMany({ where: { postId, taggedUserId } });
+  return result.count > 0;
 }
 
 export function findById(id: string, viewerId: string): Promise<PostWithMeta | null> {
@@ -81,10 +109,10 @@ export async function incrementView(id: string): Promise<void> {
 export function listByAuthor(
   authorId: string,
   viewerId: string,
-  options: { cursor?: string; limit: number },
+  options: { cursor?: string; limit: number; audienceIn?: PostAudience[] },
 ): Promise<PostWithMeta[]> {
   return prisma.post.findMany({
-    where: { authorId },
+    where: { authorId, ...(options.audienceIn ? { audience: { in: options.audienceIn } } : {}) },
     include: metaInclude(viewerId),
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: options.limit,
@@ -92,18 +120,29 @@ export function listByAuthor(
   });
 }
 
-export type PostWithHashtags = Post & { author: AuthorSummary; hashtags: PostHashtag[] };
+export type PostWithHashtags = Post & {
+  author: AuthorSummary;
+  hashtags: PostHashtag[];
+  tags: TagWithUser[];
+};
+
+const discoveryInclude = {
+  author: { select: authorSelect },
+  hashtags: true,
+  tags: { include: { taggedUser: { select: authorSelect } } },
+} as const;
 
 /**
  * Bounded recency window ranked in-memory by the service (§13.2). Per-viewer
  * like/save state isn't needed here — only the final page (after ranking +
  * offset) gets that, via `likedSavedSets`, to avoid fetching it for the
- * whole window.
+ * whole window. §24.7: only `everyone`-audience posts surface in discovery,
+ * even from a public author.
  */
 export function findRecentPublic(limit: number): Promise<PostWithHashtags[]> {
   return prisma.post.findMany({
-    where: { author: { visibility: 'public' } },
-    include: { author: { select: authorSelect }, hashtags: true },
+    where: { author: { visibility: 'public' }, audience: 'everyone' },
+    include: discoveryInclude,
     orderBy: { createdAt: 'desc' },
     take: limit,
   });
@@ -111,8 +150,12 @@ export function findRecentPublic(limit: number): Promise<PostWithHashtags[]> {
 
 export function findRecentForTag(tag: string, limit: number): Promise<PostWithHashtags[]> {
   return prisma.post.findMany({
-    where: { author: { visibility: 'public' }, hashtags: { some: { tag } } },
-    include: { author: { select: authorSelect }, hashtags: true },
+    where: {
+      author: { visibility: 'public' },
+      audience: 'everyone',
+      hashtags: { some: { tag } },
+    },
+    include: discoveryInclude,
     orderBy: { createdAt: 'desc' },
     take: limit,
   });
@@ -200,7 +243,13 @@ export function listSaved(
 
 // ── Comments ─────────────────────────────────────────────────────────────────
 
-export type CommentWithUser = Comment & { user: User };
+export type CommentWithUser = Comment & { user: User; likes: CommentLike[] };
+
+/** Viewer-scoped `likes` — presence, not the full join table (§24.6). */
+const commentInclude = (viewerId: string) => ({
+  user: true,
+  likes: { where: { userId: viewerId } },
+});
 
 export async function createComment(
   postId: string,
@@ -217,13 +266,43 @@ export async function createComment(
 /** Oldest first — a comment thread reads chronologically. */
 export function listComments(
   postId: string,
+  viewerId: string,
   options: { cursor?: string; limit: number },
 ): Promise<CommentWithUser[]> {
   return prisma.comment.findMany({
     where: { postId },
-    include: { user: true },
+    include: commentInclude(viewerId),
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     take: options.limit,
     ...(options.cursor ? { cursor: { id: options.cursor }, skip: 1 } : {}),
   });
+}
+
+export type CommentWithPost = Comment & { post: PostWithMeta };
+
+/** Loads a comment plus its post's visibility context, for the like/notify path (§24.6). */
+export function findCommentWithPost(commentId: string): Promise<CommentWithPost | null> {
+  return prisma.comment.findUnique({
+    where: { id: commentId },
+    include: { post: { include: metaInclude('') } },
+  }) as Promise<CommentWithPost | null>;
+}
+
+/** Toggle + transactional counter (§24.6); returns the new state. */
+export async function toggleCommentLike(commentId: string, userId: string): Promise<boolean> {
+  const existing = await prisma.commentLike.findUnique({
+    where: { commentId_userId: { commentId, userId } },
+  });
+  if (existing) {
+    await prisma.$transaction([
+      prisma.commentLike.delete({ where: { commentId_userId: { commentId, userId } } }),
+      prisma.comment.update({ where: { id: commentId }, data: { likeCount: { decrement: 1 } } }),
+    ]);
+    return false;
+  }
+  await prisma.$transaction([
+    prisma.commentLike.create({ data: { commentId, userId } }),
+    prisma.comment.update({ where: { id: commentId }, data: { likeCount: { increment: 1 } } }),
+  ]);
+  return true;
 }

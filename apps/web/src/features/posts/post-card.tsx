@@ -9,7 +9,7 @@ import { useToast } from '../../components/ui/toast';
 import { ReportModal } from '../reports/report-modal';
 import { PostText } from './post-text';
 import { ShareToChatModal } from './share-to-chat-modal';
-import { useDeletePost, useToggleLike, useToggleSave } from './use-posts';
+import { useDeletePost, useRemoveMyTag, useToggleLike, useToggleSave } from './use-posts';
 
 /** Feed/hashtag/explore card (§13). `/p/:id` carries the full detail + comments. */
 export function PostCard({ userId, post }: { userId: string; post: PostDto }) {
@@ -17,6 +17,7 @@ export function PostCard({ userId, post }: { userId: string; post: PostDto }) {
   const like = useToggleLike();
   const save = useToggleSave();
   const deletePost = useDeletePost();
+  const removeMyTag = useRemoveMyTag();
   const [sharing, setSharing] = useState<'menu' | 'chat' | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -87,9 +88,19 @@ export function PostCard({ userId, post }: { userId: string; post: PostDto }) {
       )}
 
       <div className="relative">
-        <Link to={`/p/${post.id}`}>
-          <ProgressiveImage src={post.mediaUrl} alt="" aspectClassName="aspect-[4/5]" />
-        </Link>
+        {post.mediaUrl ? (
+          <Link to={`/p/${post.id}`}>
+            <ProgressiveImage src={post.mediaUrl} alt="" aspectClassName="aspect-[4/5]" />
+          </Link>
+        ) : (
+          // §24.1 text-only post — no media slot, just the caption card below.
+          <Link
+            to={`/p/${post.id}`}
+            className="flex aspect-[4/5] items-center justify-center bg-surface-sunken px-6 text-center"
+          >
+            <p className="line-clamp-6 text-lg font-medium text-fg">{post.caption}</p>
+          </Link>
+        )}
         {heartPop && (
           <span
             aria-hidden
@@ -152,6 +163,20 @@ export function PostCard({ userId, post }: { userId: string; post: PostDto }) {
           <Link to={`/p/${post.id}`} className="mt-1 block text-fg-muted hover:text-fg">
             View all {post.commentCount} comment{post.commentCount === 1 ? '' : 's'}
           </Link>
+        )}
+        {post.taggedUsers.length > 0 && (
+          <p className="mt-1 text-fg-muted">
+            With {post.taggedUsers.map((u) => u.displayName).join(', ')}
+            {post.taggedUsers.some((u) => u.id === userId) && (
+              <button
+                type="button"
+                onClick={() => removeMyTag.mutate(post.id)}
+                className="ml-2 text-xs font-medium text-accent hover:text-accent-strong"
+              >
+                Remove my tag
+              </button>
+            )}
+          </p>
         )}
       </div>
 
@@ -220,12 +245,18 @@ export function PostCard({ userId, post }: { userId: string; post: PostDto }) {
 export function PostThumbnail({ post }: { post: PostDto }) {
   return (
     <Link to={`/p/${post.id}`} className="group block overflow-hidden rounded-lg">
-      <ProgressiveImage
-        src={post.mediaUrl}
-        alt=""
-        aspectClassName="aspect-square"
-        imgClassName="transition-transform group-hover:scale-105"
-      />
+      {post.mediaUrl ? (
+        <ProgressiveImage
+          src={post.mediaUrl}
+          alt=""
+          aspectClassName="aspect-square"
+          imgClassName="transition-transform group-hover:scale-105"
+        />
+      ) : (
+        <div className="flex aspect-square items-center justify-center bg-surface-sunken p-2 text-center">
+          <p className="line-clamp-4 text-xs text-fg-muted">{post.caption}</p>
+        </div>
+      )}
     </Link>
   );
 }

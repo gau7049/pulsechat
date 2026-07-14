@@ -15,6 +15,8 @@ export const pushSubscribeSchema = z.object({
     p256dh: z.string().min(1).max(256),
     auth: z.string().min(1).max(256),
   }),
+  /** §24.9 — set when the subscribing client is running installed/standalone. */
+  installedPwa: z.boolean().optional(),
 });
 export type PushSubscribeBody = z.infer<typeof pushSubscribeSchema>;
 

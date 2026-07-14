@@ -12,10 +12,10 @@ import { apiLimiter } from '../middleware/rate-limit.js';
 import { requireAuth } from '../middleware/require-auth.js';
 import { param, validateBody, validateQuery } from '../middleware/validate.js';
 
-/** Posts, comments, likes, saves (Requirement Scope §13). */
+/** Posts, comments, likes, saves (Requirement Scope §13, §24). */
 export const postsRouter: Router = Router();
 
-postsRouter.use('/posts', requireAuth, apiLimiter);
+postsRouter.use(['/posts', '/comments'], requireAuth, apiLimiter);
 
 /** §13.5 "Posts I've Liked" / "Saved Posts" — registered before /posts/:id routes. */
 postsRouter.get('/posts/liked', validateQuery(postsQuerySchema), async (req, res) => {
@@ -60,4 +60,15 @@ postsRouter.post('/posts/:id/like', async (req, res) => {
 
 postsRouter.post('/posts/:id/save', async (req, res) => {
   res.json(await postService.toggleSave(req.auth!.sub, param(req, 'id')));
+});
+
+/** §24.2 — a tagged user removes their own tag; the author cannot remove it for them. */
+postsRouter.delete('/posts/:id/tags/me', async (req, res) => {
+  await postService.removeMyTag(req.auth!.sub, param(req, 'id'));
+  res.json({ ok: true });
+});
+
+/** §24.6 comment likes. */
+postsRouter.post('/comments/:id/like', async (req, res) => {
+  res.json(await postService.toggleCommentLike(req.auth!.sub, param(req, 'id')));
 });

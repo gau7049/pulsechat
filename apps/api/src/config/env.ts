@@ -32,6 +32,8 @@ const envSchema = z
     TURN_HOST: z.string().min(1).optional(),
     VAPID_PUBLIC_KEY: z.string().min(1).optional(),
     VAPID_PRIVATE_KEY: z.string().min(1).optional(),
+    /** §24.3 — trending movies; unset means the trending-cache sweep skips TMDB and only refreshes Deezer. */
+    TMDB_API_KEY: z.string().min(1).optional(),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production') {

@@ -1,8 +1,12 @@
 import { Router } from 'express';
 import {
   createStatusSchema,
+  reactToStatusSchema,
+  respondToPollSchema,
   startLiveSchema,
   type CreateStatusBody,
+  type ReactToStatusBody,
+  type RespondToPollBody,
   type StartLiveBody,
 } from '@pulsechat/shared';
 import * as liveService from '../../services/live.service.js';
@@ -29,6 +33,29 @@ statusRouter.post('/statuses', validateBody(createStatusSchema), async (req, res
 statusRouter.delete('/statuses/:id', async (req, res) => {
   await statusService.deleteStatus(req.auth!.sub, param(req, 'id'));
   res.json({ ok: true });
+});
+
+// ── Reactions (§24.10) ───────────────────────────────────────────────────────
+
+statusRouter.post('/statuses/:id/react', validateBody(reactToStatusSchema), async (req, res) => {
+  const body = req.body as ReactToStatusBody;
+  res.json(await statusService.reactToStatus(req.auth!.sub, param(req, 'id'), body));
+});
+
+// ── Polls/questions (§24.13) ─────────────────────────────────────────────────
+
+statusRouter.post(
+  '/statuses/:id/poll/respond',
+  validateBody(respondToPollSchema),
+  async (req, res) => {
+    const body = req.body as RespondToPollBody;
+    await statusService.respondToPoll(req.auth!.sub, param(req, 'id'), body);
+    res.json({ ok: true });
+  },
+);
+
+statusRouter.get('/statuses/:id/poll/results', async (req, res) => {
+  res.json(await statusService.getPollResults(req.auth!.sub, param(req, 'id')));
 });
 
 statusRouter.post('/live/start', validateBody(startLiveSchema), async (req, res) => {

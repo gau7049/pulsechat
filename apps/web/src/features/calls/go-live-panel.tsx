@@ -2,11 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import {
   CLIENT_EVENTS,
   SERVER_EVENTS,
+  type LiveCommentPayload,
   type LiveViewerJoinedPayload,
   type LiveViewerLeftPayload,
   type RtcSignalRelayPayload,
   type StatusVisibility,
+  type UserSummaryDto,
 } from '@pulsechat/shared';
+import { Avatar } from '../../components/ui/avatar';
 import { Button } from '../../components/ui/button';
 import { Modal } from '../../components/ui/modal';
 import { useToast } from '../../components/ui/toast';
@@ -40,7 +43,9 @@ export function GoLivePanel({ onClose }: { onClose: () => void }) {
   const endLive = useEndLive();
   const [visibility, setVisibility] = useState<StatusVisibility>('everyone');
   const [live, setLive] = useState(false);
-  const [viewerCount, setViewerCount] = useState(0);
+  const [viewers, setViewers] = useState<Map<string, UserSummaryDto>>(new Map());
+  const [comments, setComments] = useState<LiveCommentPayload['comment'][]>([]);
+  const [commentText, setCommentText] = useState('');
   const localStreamRef = useRef<MediaStream | null>(null);
   const viewersRef = useRef<Map<string, ViewerConnection>>(new Map());
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -85,7 +90,7 @@ export function GoLivePanel({ onClose }: { onClose: () => void }) {
         });
         attachLocalTracks(pc, localStreamRef.current);
         viewersRef.current.set(payload.viewer.id, { pc, candidateQueue: makeCandidateQueue(pc) });
-        setViewerCount(viewersRef.current.size);
+        setViewers((prev) => new Map(prev).set(payload.viewer.id, payload.viewer));
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
@@ -102,7 +107,16 @@ export function GoLivePanel({ onClose }: { onClose: () => void }) {
       if (payload.broadcasterUserId !== user.id) return;
       viewersRef.current.get(payload.viewerId)?.pc.close();
       viewersRef.current.delete(payload.viewerId);
-      setViewerCount(viewersRef.current.size);
+      setViewers((prev) => {
+        const next = new Map(prev);
+        next.delete(payload.viewerId);
+        return next;
+      });
+    };
+
+    const onComment = (payload: LiveCommentPayload) => {
+      if (payload.broadcasterUserId !== user.id) return;
+      setComments((prev) => [...prev.slice(-29), payload.comment]);
     };
 
     const onAnswer = (payload: RtcSignalRelayPayload) => {
@@ -126,13 +140,18 @@ export function GoLivePanel({ onClose }: { onClose: () => void }) {
 
     socket.on(SERVER_EVENTS.LIVE_VIEWER_JOINED, onViewerJoined);
     socket.on(SERVER_EVENTS.LIVE_VIEWER_LEFT, onViewerLeft);
+    socket.on(SERVER_EVENTS.LIVE_COMMENT, onComment);
     socket.on(CLIENT_EVENTS.CALL_ANSWER, onAnswer);
     socket.on(CLIENT_EVENTS.CALL_ICE_CANDIDATE, onIceCandidate);
+    // §24.15 — join our own live room so we receive comments broadcast to it.
+    socket.emit(CLIENT_EVENTS.LIVE_JOIN, { broadcasterUserId: user.id });
     return () => {
       socket.off(SERVER_EVENTS.LIVE_VIEWER_JOINED, onViewerJoined);
       socket.off(SERVER_EVENTS.LIVE_VIEWER_LEFT, onViewerLeft);
+      socket.off(SERVER_EVENTS.LIVE_COMMENT, onComment);
       socket.off(CLIENT_EVENTS.CALL_ANSWER, onAnswer);
       socket.off(CLIENT_EVENTS.CALL_ICE_CANDIDATE, onIceCandidate);
+      socket.emit(CLIENT_EVENTS.LIVE_LEAVE, { broadcasterUserId: user.id });
     };
   }, [user, live]);
 
@@ -167,11 +186,61 @@ export function GoLivePanel({ onClose }: { onClose: () => void }) {
             >
               <option value="everyone">Everyone</option>
               <option value="friends">Friends only</option>
+              <option value="close_friends">Close friends</option>
             </select>
           </label>
         )}
 
-        {live && <p className="text-sm text-fg-muted">👀 {viewerCount} watching</p>}
+        {live && (
+          <>
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-fg-muted">👀 {viewers.size} watching</p>
+              <div className="flex -space-x-2">
+                {[...viewers.values()].slice(0, 6).map((viewer) => (
+                  <span key={viewer.id} className="rounded-full ring-2 ring-surface-raised">
+                    <Avatar name={viewer.displayName} src={viewer.avatarUrl} size="sm" />
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex max-h-32 flex-col gap-1 overflow-y-auto rounded-lg bg-surface-sunken p-2">
+              {comments.length === 0 ? (
+                <p className="text-xs text-fg-muted">No comments yet.</p>
+              ) : (
+                comments.map((comment) => (
+                  <p key={comment.id} className="text-xs text-fg">
+                    <span className="font-semibold">{comment.user.displayName}: </span>
+                    {comment.text}
+                  </p>
+                ))
+              )}
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const text = commentText.trim();
+                if (!text || !user) return;
+                getSocket()?.emit(CLIENT_EVENTS.LIVE_COMMENT, {
+                  broadcasterUserId: user.id,
+                  text,
+                });
+                setCommentText('');
+              }}
+              className="flex gap-2"
+            >
+              <input
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                placeholder="Say something…"
+                className="min-w-0 flex-1 rounded-lg border border-border bg-surface-raised px-2 py-1.5 text-sm text-fg"
+              />
+              <Button type="submit" size="sm" disabled={!commentText.trim()}>
+                Send
+              </Button>
+            </form>
+          </>
+        )}
 
         <div className="flex justify-end gap-2">
           <Button type="button" variant="secondary" onClick={() => void handleEnd()}>

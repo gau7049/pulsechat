@@ -8,13 +8,22 @@ import { useDebouncedValue } from '../../lib/use-debounced-value';
 import { InviteShareButton } from './invite-share-button';
 import { RelationshipButton } from './relationship-button';
 import { UserCard } from './user-card';
-import { useFriendRequests, useFriends, useSuggestions, useUserSearch } from './use-social';
+import {
+  useAddCloseFriend,
+  useCloseFriends,
+  useFriendRequests,
+  useFriends,
+  useRemoveCloseFriend,
+  useSuggestions,
+  useUserSearch,
+} from './use-social';
 
 const TABS = [
   { path: 'search', label: 'Search' },
   { path: 'suggestions', label: 'Suggestions' },
   { path: 'requests', label: 'Requests' },
   { path: 'friends', label: 'Friends' },
+  { path: 'close-friends', label: 'Close Friends' },
 ] as const;
 
 /** Social hub (Requirement Scope §9–10): find, request, and manage friends. */
@@ -52,6 +61,7 @@ export function PeoplePage() {
           <Route path="suggestions" element={<SuggestionsTab />} />
           <Route path="requests" element={<RequestsTab />} />
           <Route path="friends" element={<FriendsTab />} />
+          <Route path="close-friends" element={<CloseFriendsTab />} />
         </Routes>
       </div>
     </main>
@@ -296,6 +306,85 @@ function FriendsTab() {
         isFetchingNextPage={friends.isFetchingNextPage}
         fetchNextPage={() => void friends.fetchNextPage()}
       />
+    </div>
+  );
+}
+
+/** §24.12 — a private, story-audience subset of your friends. */
+function CloseFriendsTab() {
+  const closeFriends = useCloseFriends();
+  const friends = useFriends();
+  const addCloseFriend = useAddCloseFriend();
+  const removeCloseFriend = useRemoveCloseFriend();
+
+  if (closeFriends.isLoading || friends.isLoading) return <ListSkeleton />;
+  if (closeFriends.isError || friends.isError) {
+    return (
+      <LoadError retry={() => void Promise.all([closeFriends.refetch(), friends.refetch()])} />
+    );
+  }
+
+  const closeIds = new Set((closeFriends.data?.items ?? []).map((i) => i.user.id));
+  const allFriends = friends.data?.pages.flatMap((page) => page.items) ?? [];
+  const remaining = allFriends.filter((f) => !closeIds.has(f.user.id));
+
+  return (
+    <div className="flex flex-col gap-6">
+      <p className="px-3 text-sm text-fg-muted">
+        Close friends see your close-friends-only statuses; no one is notified when you add or
+        remove them.
+      </p>
+      <section aria-label="Your close friends">
+        <h2 className="px-3 pb-1 text-xs font-semibold tracking-wide text-fg-muted uppercase">
+          Close friends
+        </h2>
+        {(closeFriends.data?.items.length ?? 0) === 0 ? (
+          <EmptyState
+            icon="💚"
+            title="No close friends yet"
+            description="Add friends below to share close-friends-only statuses with them."
+          />
+        ) : (
+          closeFriends.data?.items.map((entry) => (
+            <UserCard
+              key={entry.user.id}
+              user={entry.user}
+              action={
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  loading={removeCloseFriend.isPending}
+                  onClick={() => void removeCloseFriend.mutateAsync(entry.user.id)}
+                >
+                  Remove
+                </Button>
+              }
+            />
+          ))
+        )}
+      </section>
+      {remaining.length > 0 && (
+        <section aria-label="Add a close friend">
+          <h2 className="px-3 pb-1 text-xs font-semibold tracking-wide text-fg-muted uppercase">
+            Add from your friends
+          </h2>
+          {remaining.map((friend) => (
+            <UserCard
+              key={friend.user.id}
+              user={friend.user}
+              action={
+                <Button
+                  size="sm"
+                  loading={addCloseFriend.isPending}
+                  onClick={() => void addCloseFriend.mutateAsync(friend.user.id)}
+                >
+                  Add
+                </Button>
+              }
+            />
+          ))}
+        </section>
+      )}
     </div>
   );
 }

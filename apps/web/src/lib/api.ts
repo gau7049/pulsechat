@@ -42,6 +42,8 @@ interface RequestOptions {
   body?: unknown;
   /** Skip the automatic refresh-and-retry (used by auth endpoints themselves). */
   noRetry?: boolean;
+  /** §6.2 step-up re-auth — sent as `x-step-up-token` for sensitive actions. */
+  stepUpToken?: string;
 }
 
 async function rawRequest(
@@ -55,6 +57,7 @@ async function rawRequest(
     headers: {
       ...(options.body !== undefined ? { 'content-type': 'application/json' } : {}),
       ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
+      ...(options.stepUpToken ? { 'x-step-up-token': options.stepUpToken } : {}),
     },
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   });
@@ -123,6 +126,9 @@ export async function api<T>(
 }
 
 export const get = <T>(path: string) => api<T>('GET', path);
-export const post = <T>(path: string, body?: unknown) => api<T>('POST', path, { body });
-export const patch = <T>(path: string, body?: unknown) => api<T>('PATCH', path, { body });
-export const del = <T>(path: string) => api<T>('DELETE', path);
+export const post = <T>(path: string, body?: unknown, opts?: { stepUpToken?: string }) =>
+  api<T>('POST', path, { body, ...opts });
+export const patch = <T>(path: string, body?: unknown, opts?: { stepUpToken?: string }) =>
+  api<T>('PATCH', path, { body, ...opts });
+export const del = <T>(path: string, opts?: { stepUpToken?: string }) =>
+  api<T>('DELETE', path, opts);

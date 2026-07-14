@@ -1,10 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { STATUS_MUSIC_TRACKS, type StatusFeedEntryDto } from '@pulsechat/shared';
+import {
+  STATUS_MUSIC_TRACKS,
+  type StatusDto,
+  type StatusFeedEntryDto,
+  type UserSummaryDto,
+} from '@pulsechat/shared';
 import { Avatar } from '../../components/ui/avatar';
+import { Button } from '../../components/ui/button';
+import { useToast } from '../../components/ui/toast';
 import { useAuth } from '../auth/auth-context';
-import { useDeleteStatus } from './use-status';
+import { generateContentKey, wrapKeyFor } from '../../lib/crypto/conversation-keys';
+import { serializeEnvelope } from '../chat/message-envelope';
+import { useConversations, useCreateConversation, useSendToConversation } from '../chat/use-chat';
+import { useFriends } from '../social/use-social';
+import { useDeleteStatus, usePollResults, useReactToStatus, useRespondToPoll } from './use-status';
 
 const AUTO_ADVANCE_MS = 6000;
+const QUICK_REACTIONS = ['❤️', '😂', '😮', '😢', '👏', '🔥'];
 
 /**
  * Full-screen status viewer (Requirement Scope §11): tap-through between a
@@ -152,6 +164,16 @@ export function StatusViewer({
         <p className="px-4 pb-3 text-center text-sm">{status.caption}</p>
       )}
 
+      {status.poll && (
+        <PollBlock key={status.id} status={status} isOwner={status.userId === user.id} />
+      )}
+
+      <ReactionRow key={`react-${status.id}`} status={status} />
+
+      {status.userId !== user.id && (
+        <StoryReplyBar key={`reply-${status.id}`} owner={person.user} status={status} />
+      )}
+
       {status.userId === user.id && (
         <button
           type="button"
@@ -162,5 +184,211 @@ export function StatusViewer({
         </button>
       )}
     </div>
+  );
+}
+
+// ── Reactions (§24.10) ───────────────────────────────────────────────────────
+
+function ReactionRow({ status }: { status: StatusDto }) {
+  const react = useReactToStatus();
+  return (
+    <div className="mb-3 flex items-center justify-center gap-2">
+      {QUICK_REACTIONS.map((emoji) => (
+        <button
+          key={emoji}
+          type="button"
+          aria-label={`React with ${emoji}`}
+          onClick={() => void react.mutateAsync({ statusId: status.id, body: { emoji } })}
+          className={`flex size-8 items-center justify-center rounded-full text-lg transition-transform hover:scale-110 ${
+            status.myReaction === emoji ? 'bg-white/25' : 'bg-white/5'
+          }`}
+        >
+          {emoji}
+        </button>
+      ))}
+      {status.reactionCount > 0 && (
+        <span className="text-xs text-white/70">{status.reactionCount}</span>
+      )}
+    </div>
+  );
+}
+
+// ── Polls/questions (§24.13) ─────────────────────────────────────────────────
+
+function PollBlock({ status, isOwner }: { status: StatusDto; isOwner: boolean }) {
+  const poll = status.poll!;
+  const respond = useRespondToPoll();
+  const [answerText, setAnswerText] = useState('');
+  const [showResults, setShowResults] = useState(false);
+  const results = usePollResults(showResults ? status.id : null);
+
+  if (isOwner) {
+    return (
+      <div className="mx-auto mb-3 w-full max-w-xs text-center">
+        <p className="mb-2 text-sm font-medium">{poll.question}</p>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          onClick={() => setShowResults((v) => !v)}
+        >
+          {showResults ? 'Hide results' : 'View results'}
+        </Button>
+        {showResults && results.data && (
+          <div className="mt-2 flex flex-col gap-1 text-left text-xs text-white/90">
+            {results.data.kind === 'poll'
+              ? results.data.options.map((option) => (
+                  <div
+                    key={option.id}
+                    className="flex justify-between rounded bg-white/10 px-2 py-1"
+                  >
+                    <span>{option.label}</span>
+                    <span>{option.count}</span>
+                  </div>
+                ))
+              : results.data.answers.map((answer, i) => (
+                  <div key={i} className="rounded bg-white/10 px-2 py-1">
+                    <span className="font-medium">{answer.user.displayName}: </span>
+                    {answer.answerText}
+                  </div>
+                ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (poll.myResponse) {
+    return (
+      <p className="mx-auto mb-3 max-w-xs text-center text-sm text-white/70">
+        {poll.question} — thanks for responding!
+      </p>
+    );
+  }
+
+  return (
+    <div className="mx-auto mb-3 flex w-full max-w-xs flex-col gap-2">
+      <p className="text-center text-sm font-medium">{poll.question}</p>
+      {poll.kind === 'poll' ? (
+        <div className="flex flex-col gap-1">
+          {poll.options?.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              disabled={respond.isPending}
+              onClick={() =>
+                void respond.mutateAsync({
+                  statusId: status.id,
+                  body: { selectedOptionId: option.id },
+                })
+              }
+              className="rounded-lg bg-white/10 px-3 py-1.5 text-sm hover:bg-white/20"
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!answerText.trim()) return;
+            void respond
+              .mutateAsync({ statusId: status.id, body: { answerText: answerText.trim() } })
+              .then(() => setAnswerText(''));
+          }}
+          className="flex gap-2"
+        >
+          <input
+            value={answerText}
+            onChange={(e) => setAnswerText(e.target.value)}
+            placeholder="Type your answer…"
+            className="min-w-0 flex-1 rounded-lg bg-white/10 px-3 py-1.5 text-sm text-white placeholder:text-white/50"
+          />
+          <Button type="submit" size="sm" loading={respond.isPending}>
+            Send
+          </Button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+// ── Reply (§24.10, reuses the encrypted chat pipeline like M6's post-share) ──
+
+function StoryReplyBar({ owner, status }: { owner: UserSummaryDto; status: StatusDto }) {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const conversations = useConversations();
+  const friends = useFriends();
+  const createConversation = useCreateConversation();
+  const sendTo = useSendToConversation(user!.id);
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+
+  async function send(): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed || !user) return;
+    setSending(true);
+    try {
+      let conversation = conversations.data?.items.find(
+        (c) => c.type === 'direct' && c.members.some((m) => m.user.id === owner.id),
+      );
+      if (!conversation) {
+        const friend = friends.data?.pages
+          .flatMap((page) => page.items)
+          .find((f) => f.user.id === owner.id);
+        if (!friend?.publicKey || !user.publicKey) {
+          toast('This friend has no encryption keys yet', { kind: 'error' });
+          return;
+        }
+        const contentKey = await generateContentKey();
+        const [myWrappedKey, wrappedKey] = await Promise.all([
+          wrapKeyFor(user.publicKey, contentKey),
+          wrapKeyFor(friend.publicKey, contentKey),
+        ]);
+        const created = await createConversation.mutateAsync({
+          type: 'direct',
+          members: [{ userId: owner.id, wrappedKey }],
+          myWrappedKey,
+        });
+        conversation = created.conversation;
+      }
+      const envelope = serializeEnvelope({
+        v: 1,
+        type: 'story-reply',
+        story: { statusId: status.id, mediaUrl: status.mediaUrl, caption: status.caption },
+        text: trimmed,
+      });
+      await sendTo(conversation, envelope);
+      setText('');
+      toast('Reply sent', { kind: 'success' });
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Could not send the reply', {
+        kind: 'error',
+      });
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        void send();
+      }}
+      className="mx-auto mb-4 flex w-full max-w-sm gap-2 px-4"
+    >
+      <input
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder={`Reply to ${owner.displayName}…`}
+        className="min-w-0 flex-1 rounded-full bg-white/10 px-4 py-2 text-sm text-white placeholder:text-white/50"
+      />
+      <Button type="submit" size="sm" loading={sending} disabled={!text.trim()}>
+        Send
+      </Button>
+    </form>
   );
 }

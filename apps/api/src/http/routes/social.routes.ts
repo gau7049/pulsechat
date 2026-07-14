@@ -21,7 +21,11 @@ import { param, validateBody, validateQuery } from '../middleware/validate.js';
 /** Social graph endpoints (Technical Spec §8: Search & Friends group). */
 export const socialRouter: Router = Router();
 
-socialRouter.use(['/search', '/friend-requests', '/friends', '/blocks'], requireAuth, apiLimiter);
+socialRouter.use(
+  ['/search', '/friend-requests', '/friends', '/blocks', '/close-friends'],
+  requireAuth,
+  apiLimiter,
+);
 
 // ── Search (§9) ──────────────────────────────────────────────────────────────
 
@@ -93,5 +97,21 @@ socialRouter.post('/blocks', validateBody(blockUserSchema), async (req, res) => 
 
 socialRouter.delete('/blocks/:userId', async (req, res) => {
   await socialService.unblockUser(req.auth!.sub, req.params.userId);
+  res.json({ ok: true });
+});
+
+// ── Close friends (§24.12) ───────────────────────────────────────────────────
+
+socialRouter.get('/close-friends', async (req, res) => {
+  res.json({ items: await socialService.listCloseFriends(req.auth!.sub) });
+});
+
+socialRouter.post('/close-friends/:userId', async (req, res) => {
+  await socialService.addCloseFriend(req.auth!.sub, req.params.userId);
+  res.status(201).json({ ok: true });
+});
+
+socialRouter.delete('/close-friends/:userId', async (req, res) => {
+  await socialService.removeCloseFriend(req.auth!.sub, req.params.userId);
   res.json({ ok: true });
 });

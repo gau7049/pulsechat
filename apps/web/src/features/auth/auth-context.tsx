@@ -43,7 +43,12 @@ interface AuthContextValue {
   /** True while the initial silent session restore is in flight. */
   restoring: boolean;
   register: (input: RegisterInput) => Promise<void>;
-  login: (username: string, password: string, turnstileToken?: string) => Promise<LoginResult>;
+  login: (
+    username: string,
+    password: string,
+    turnstileToken?: string,
+    rememberMe?: boolean,
+  ) => Promise<LoginResult>;
   verifyOtp: (pendingToken: string, code: string) => Promise<void>;
   verifyMagicLink: (token: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -128,7 +133,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const login = useCallback(
-    async (username: string, password: string, turnstileToken?: string): Promise<LoginResult> => {
+    async (
+      username: string,
+      password: string,
+      turnstileToken?: string,
+      rememberMe = false,
+    ): Promise<LoginResult> => {
       pendingPassword.current = password;
       const result = await post<
         | AuthResultDto
@@ -139,6 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
         turnstileToken,
         deviceFingerprint: getDeviceFingerprint(),
+        rememberMe,
       });
       if ('otpRequired' in result) {
         return { kind: 'otp_required', pendingToken: result.pendingToken };

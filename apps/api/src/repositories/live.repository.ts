@@ -1,4 +1,4 @@
-import type { LiveSession } from '@prisma/client';
+import type { LiveSession, StatusVisibility } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 
 /**
@@ -7,10 +7,7 @@ import { prisma } from '../lib/prisma.js';
  * one active session per user at a time.
  */
 
-export async function start(
-  userId: string,
-  visibility: 'everyone' | 'friends',
-): Promise<LiveSession> {
+export async function start(userId: string, visibility: StatusVisibility): Promise<LiveSession> {
   return prisma.$transaction(async (tx) => {
     await tx.liveSession.updateMany({
       where: { userId, endedAt: null },

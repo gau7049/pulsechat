@@ -1,28 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import type { NotificationDto } from '@pulsechat/shared';
+import { Link } from 'react-router-dom';
 import { Avatar } from '../../components/ui/avatar';
 import { Button } from '../../components/ui/button';
 import { EmptyState } from '../../components/ui/empty-state';
 import { SkeletonRow } from '../../components/ui/skeleton';
+import { deepLinkFor, describeNotification, thumbnailFor } from './notification-utils';
 import { unreadCountFrom, useMarkAllRead, useNotifications } from './use-notifications';
-
-function describe(n: NotificationDto): string {
-  const from = (n.payload.from as { displayName?: string } | undefined)?.displayName ?? 'Someone';
-  switch (n.type) {
-    case 'friend_request':
-      return `${from} sent you a friend request`;
-    case 'friend_accept':
-      return `${from} accepted your friend request`;
-    case 'post_like':
-      return `${from} liked your post`;
-    case 'post_comment':
-      return `${from} commented on your post`;
-    case 'moderation_warning':
-      return String(n.payload.reason ?? 'Your content was reviewed by moderation');
-    default:
-      return `${from} sent you a notification`;
-  }
-}
 
 /** Bell menu (§12: "rendered from a bell menu, marked read on view"). */
 export function NotificationBell() {
@@ -93,38 +76,61 @@ export function NotificationBell() {
             <EmptyState icon="🔔" title="No notifications yet" />
           )}
           <ul className="max-h-96 overflow-y-auto">
-            {items.map((n) => (
-              <li
-                key={n.id}
-                className={`flex items-start gap-2 rounded-xl px-2 py-2 text-sm ${
-                  n.readAt ? 'text-fg-muted' : 'bg-accent-soft/40 text-fg'
-                }`}
-              >
-                <Avatar
-                  name={
-                    (n.payload.from as { displayName?: string } | undefined)?.displayName ?? '?'
-                  }
-                  src={(n.payload.from as { avatarUrl?: string | null } | undefined)?.avatarUrl}
-                  size="sm"
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="block">{describe(n)}</span>
-                  <span className="text-[10px] text-fg-muted">
-                    {new Date(n.createdAt).toLocaleString()}
+            {items.slice(0, 8).map((n) => {
+              const href = deepLinkFor(n);
+              const thumbnail = thumbnailFor(n);
+              const row = (
+                <span className="flex min-w-0 flex-1 items-start gap-2">
+                  <Avatar
+                    name={
+                      (n.payload.from as { displayName?: string } | undefined)?.displayName ?? '?'
+                    }
+                    src={(n.payload.from as { avatarUrl?: string | null } | undefined)?.avatarUrl}
+                    size="sm"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block">{describeNotification(n)}</span>
+                    <span className="text-[10px] text-fg-muted">
+                      {new Date(n.createdAt).toLocaleString()}
+                    </span>
                   </span>
+                  {thumbnail && (
+                    <img
+                      src={thumbnail}
+                      alt=""
+                      loading="lazy"
+                      className="size-9 shrink-0 rounded-md object-cover"
+                    />
+                  )}
                 </span>
-              </li>
-            ))}
+              );
+              return (
+                <li
+                  key={n.id}
+                  className={`rounded-xl text-sm ${n.readAt ? 'text-fg-muted' : 'bg-accent-soft/40 text-fg'}`}
+                >
+                  {href ? (
+                    <Link
+                      to={href}
+                      onClick={() => setOpen(false)}
+                      className="flex items-start gap-2 rounded-xl px-2 py-2 hover:bg-surface-sunken"
+                    >
+                      {row}
+                    </Link>
+                  ) : (
+                    <span className="flex items-start gap-2 px-2 py-2">{row}</span>
+                  )}
+                </li>
+              );
+            })}
           </ul>
-          {query.hasNextPage && (
-            <button
-              type="button"
-              className="w-full rounded-lg py-2 text-center text-xs font-medium text-accent hover:text-accent-strong"
-              onClick={() => void query.fetchNextPage()}
-            >
-              {query.isFetchingNextPage ? 'Loading…' : 'Show more'}
-            </button>
-          )}
+          <Link
+            to="/notifications"
+            onClick={() => setOpen(false)}
+            className="block w-full rounded-lg py-2 text-center text-xs font-medium text-accent hover:text-accent-strong"
+          >
+            See all
+          </Link>
         </div>
       )}
     </div>

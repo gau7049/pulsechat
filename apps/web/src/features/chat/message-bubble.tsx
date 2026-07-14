@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Link } from 'react-router-dom';
 import type { ConversationDto, MessageDto } from '@pulsechat/shared';
 import { Button } from '../../components/ui/button';
@@ -77,6 +77,10 @@ export function MessageBubble({
   const decrypted = useDecryptedMessage(userId, conversation, deleted ? null : message);
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [showQuickBar, setShowQuickBar] = useState(false);
+  const [viewingImage, setViewingImage] = useState<{ url: string; name: string } | null>(null);
+  const longPressTimer = useRef<number | null>(null);
+  const react = useToggleReaction(conversation.id, userId);
 
   useSyncExternalStore(ackEmitter.subscribe, getAckVersion);
   const recipients = conversation.members
@@ -118,7 +122,32 @@ export function MessageBubble({
         />
       )}
 
-      <div className={`flex max-w-[78%] flex-col ${own ? 'items-end' : 'items-start'}`}>
+      <div
+        className={`relative flex max-w-[78%] flex-col ${own ? 'items-end' : 'items-start'}`}
+        onMouseEnter={() => !deleted && !localState && setShowQuickBar(true)}
+        onMouseLeave={() => setShowQuickBar(false)}
+        onTouchStart={() => {
+          if (deleted || localState) return;
+          longPressTimer.current = window.setTimeout(() => setShowQuickBar(true), 500);
+        }}
+        onTouchEnd={() => {
+          if (longPressTimer.current) window.clearTimeout(longPressTimer.current);
+        }}
+        onTouchMove={() => {
+          if (longPressTimer.current) window.clearTimeout(longPressTimer.current);
+        }}
+      >
+        {!deleted && !localState && (
+          <QuickReactionBar
+            visible={showQuickBar}
+            own={own}
+            onPick={(emoji) => {
+              react.mutate({ messageId: message.id, emoji });
+              setShowQuickBar(false);
+            }}
+            onClose={() => setShowQuickBar(false)}
+          />
+        )}
         <div
           className={`rounded-2xl px-3 py-2 text-sm shadow-sm ${
             plainBubble
@@ -155,7 +184,12 @@ export function MessageBubble({
           {deleted ? (
             <p className="text-xs italic opacity-70">🚫 This message was deleted</p>
           ) : (
-            <BubbleContent decrypted={decrypted} envelope={envelope} bigEmoji={isBigEmoji} />
+            <BubbleContent
+              decrypted={decrypted}
+              envelope={envelope}
+              bigEmoji={isBigEmoji}
+              onImageClick={(url, name) => setViewingImage({ url, name })}
+            />
           )}
 
           <span
@@ -207,6 +241,29 @@ export function MessageBubble({
       {canInspect && showBreakdown && (
         <BreakdownModal messageId={message.id} onClose={() => setShowBreakdown(false)} />
       )}
+
+      {viewingImage && (
+        <ImageLightbox
+          image={viewingImage}
+          onClose={() => setViewingImage(null)}
+          onReply={
+            actions.onReply
+              ? () => {
+                  actions.onReply?.(message);
+                  setViewingImage(null);
+                }
+              : undefined
+          }
+          onForward={
+            actions.onForward
+              ? () => {
+                  actions.onForward?.(message);
+                  setViewingImage(null);
+                }
+              : undefined
+          }
+        />
+      )}
     </div>
   );
 }
@@ -217,10 +274,12 @@ function BubbleContent({
   decrypted,
   envelope,
   bigEmoji,
+  onImageClick,
 }: {
   decrypted: DecryptState;
   envelope: MessageEnvelope | null;
   bigEmoji: boolean;
+  onImageClick: (url: string, name: string) => void;
 }) {
   if (decrypted.state === 'loading') return <Skeleton className="h-4 w-32" />;
   if (decrypted.state === 'locked') {
@@ -248,12 +307,19 @@ function BubbleContent({
     case 'image':
       return (
         <span className="block">
-          <img
-            src={envelope.attachment.url}
-            alt={envelope.attachment.name}
-            loading="lazy"
-            className="max-h-72 max-w-full rounded-lg object-contain"
-          />
+          <button
+            type="button"
+            aria-label="Open photo"
+            onClick={() => onImageClick(envelope.attachment.url, envelope.attachment.name)}
+            className="block cursor-zoom-in"
+          >
+            <img
+              src={envelope.attachment.url}
+              alt={envelope.attachment.name}
+              loading="lazy"
+              className="max-h-72 max-w-full rounded-lg object-contain"
+            />
+          </button>
           {envelope.text && (
             <span className="mt-1 block">
               <LinkifiedText text={envelope.text} />
@@ -295,7 +361,9 @@ function BubbleContent({
           to={`/p/${envelope.post.postId}`}
           className="block overflow-hidden rounded-lg border border-white/20"
         >
-          <img src={envelope.post.mediaUrl} alt="" className="max-h-56 w-full object-cover" />
+          {envelope.post.mediaUrl && (
+            <img src={envelope.post.mediaUrl} alt="" className="max-h-56 w-full object-cover" />
+          )}
           <span className="block px-2 py-1.5 text-xs">
             <span className="font-semibold">{envelope.post.authorDisplayName}</span>
             {envelope.post.caption && (
@@ -304,7 +372,110 @@ function BubbleContent({
           </span>
         </Link>
       );
+    case 'story-reply':
+      return (
+        <span className="block">
+          {envelope.story.mediaUrl && (
+            <img
+              src={envelope.story.mediaUrl}
+              alt=""
+              className="mb-1 max-h-40 w-28 rounded-lg border border-white/20 object-cover"
+            />
+          )}
+          <span className="mb-1 block text-[11px] opacity-70">Replied to your story</span>
+          <LinkifiedText text={envelope.text} />
+        </span>
+      );
   }
+}
+
+// ── Image lightbox (§14.8 tap-to-view) ───────────────────────────────────────
+
+/** Full-size photo viewer with WhatsApp-style reply/forward/download actions. */
+function ImageLightbox({
+  image,
+  onClose,
+  onReply,
+  onForward,
+}: {
+  image: { url: string; name: string };
+  onClose: () => void;
+  onReply?: () => void;
+  onForward?: () => void;
+}) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Photo"
+      className="fixed inset-0 z-50 flex flex-col bg-black/90"
+    >
+      <div className="flex items-center justify-end gap-1 p-2">
+        <button
+          ref={closeButtonRef}
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          className="flex size-9 items-center justify-center rounded-full text-xl text-white/90 hover:bg-white/10"
+        >
+          ✕
+        </button>
+      </div>
+      <button
+        type="button"
+        aria-label="Close photo"
+        onClick={onClose}
+        className="flex min-h-0 flex-1 cursor-zoom-out items-center justify-center p-2"
+      >
+        <img
+          src={image.url}
+          alt={image.name}
+          onClick={(e) => e.stopPropagation()}
+          className="max-h-full max-w-full cursor-default object-contain"
+        />
+      </button>
+      <div className="flex items-center justify-center gap-2 p-3">
+        {onReply && (
+          <button
+            type="button"
+            onClick={onReply}
+            className="flex items-center gap-1.5 rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/20"
+          >
+            ↩ Reply
+          </button>
+        )}
+        {onForward && (
+          <button
+            type="button"
+            onClick={onForward}
+            className="flex items-center gap-1.5 rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/20"
+          >
+            ↪ Forward
+          </button>
+        )}
+        <a
+          href={image.url}
+          download={image.name}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1.5 rounded-full bg-white/10 px-4 py-2 text-sm font-medium text-white hover:bg-white/20"
+        >
+          ⬇ Download
+        </a>
+      </div>
+    </div>
+  );
 }
 
 // ── Reply quote (§14.5) ──────────────────────────────────────────────────────
@@ -340,7 +511,9 @@ function ReplyQuote({
           ? `${envelope.emoji} Sticker`
           : envelope.type === 'post-share'
             ? '📤 Shared post'
-            : `📎 ${envelope.type}`;
+            : envelope.type === 'story-reply'
+              ? `↩️ ${envelope.text}`
+              : `📎 ${envelope.type}`;
   }
 
   return (
@@ -360,6 +533,56 @@ function ReplyQuote({
   );
 }
 
+// ── Quick-reaction bar (§24.4) ───────────────────────────────────────────────
+
+/**
+ * A standalone long-press (touch) / hover (desktop) floating bar — distinct
+ * from the same emoji set already living inside the "⋯" menu, which stays
+ * as a secondary path to the same action.
+ */
+function QuickReactionBar({
+  visible,
+  own,
+  onPick,
+  onClose,
+}: {
+  visible: boolean;
+  own: boolean;
+  onPick: (emoji: string) => void;
+  onClose: () => void;
+}) {
+  if (!visible) return null;
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Close quick reactions"
+        className="fixed inset-0 z-30 cursor-default"
+        onClick={onClose}
+      />
+      <div
+        role="menu"
+        aria-label="Quick reactions"
+        className={`absolute bottom-full z-40 mb-1 flex gap-0.5 rounded-full border border-border bg-surface-raised px-1.5 py-1 shadow-lg ${
+          own ? 'right-0' : 'left-0'
+        }`}
+      >
+        {QUICK_REACTIONS.map((emoji) => (
+          <button
+            key={emoji}
+            type="button"
+            aria-label={`React ${emoji}`}
+            onClick={() => onPick(emoji)}
+            className="rounded-full p-1 text-lg leading-none hover:bg-surface-sunken"
+          >
+            {emoji}
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
 // ── Reactions (§14.4) ────────────────────────────────────────────────────────
 
 function ReactionChips({
@@ -372,6 +595,7 @@ function ReactionChips({
   userId: string;
 }) {
   const toggle = useToggleReaction(conversation.id, userId);
+  const [showWho, setShowWho] = useState(false);
   const grouped = new Map<string, number>();
   for (const reaction of message.reactions) {
     grouped.set(reaction.emoji, (grouped.get(reaction.emoji) ?? 0) + 1);
@@ -379,7 +603,7 @@ function ReactionChips({
   const mine = message.reactions.find((r) => r.userId === userId)?.emoji;
 
   return (
-    <span className="mt-0.5 flex flex-wrap gap-1">
+    <span className="mt-0.5 flex flex-wrap items-center gap-1">
       {[...grouped.entries()].map(([emoji, count]) => (
         <button
           key={emoji}
@@ -396,6 +620,41 @@ function ReactionChips({
           {count > 1 && <span className="text-[10px] text-fg-muted">{count}</span>}
         </button>
       ))}
+      {message.reactions.length > 0 && (
+        // §24.4 "tapping the badge shows who reacted with what".
+        <button
+          type="button"
+          aria-label="See who reacted"
+          onClick={() => setShowWho(true)}
+          className="text-[10px] text-fg-muted underline decoration-dotted hover:text-fg"
+        >
+          who?
+        </button>
+      )}
+      {showWho && (
+        <Modal open onClose={() => setShowWho(false)} title="Reactions">
+          <div className="flex max-h-72 flex-col gap-1 overflow-y-auto">
+            {message.reactions.map((reaction) => {
+              const reactor = conversation.members.find((m) => m.user.id === reaction.userId);
+              return (
+                <div
+                  key={reaction.userId}
+                  className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm"
+                >
+                  <span className="text-fg">
+                    {reaction.userId === userId
+                      ? 'You'
+                      : (reactor?.user.displayName ?? 'Former member')}
+                  </span>
+                  <span aria-hidden className="text-lg">
+                    {reaction.emoji}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </Modal>
+      )}
     </span>
   );
 }

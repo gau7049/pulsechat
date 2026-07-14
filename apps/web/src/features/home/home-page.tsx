@@ -5,6 +5,7 @@ import { EmptyState } from '../../components/ui/empty-state';
 import { useAuth } from '../auth/auth-context';
 import { useConversations } from '../chat/use-chat';
 import { conversationTitle, otherMember } from '../chat/conversation-utils';
+import { InstallBanner } from '../pwa/install-banner';
 import { StatusRail } from '../status/status-rail';
 import { useActiveCount } from '../status/use-active-count';
 
@@ -53,6 +54,8 @@ function SignedInHome() {
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-8">
+      <InstallBanner />
+
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-4">
           <Avatar name={user.displayName} src={user.avatarUrl} size="lg" />

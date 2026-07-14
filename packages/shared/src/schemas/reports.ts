@@ -61,7 +61,7 @@ export interface ReportAdminDto {
   status: ReportStatus;
   createdAt: string;
   preview:
-    | { kind: 'post'; mediaUrl: string; caption: string | null; author: UserSummaryDto }
+    | { kind: 'post'; mediaUrl: string | null; caption: string | null; author: UserSummaryDto }
     | { kind: 'message'; conversationId: string; sender: UserSummaryDto }
     | { kind: 'profile'; user: UserSummaryDto }
     | null;

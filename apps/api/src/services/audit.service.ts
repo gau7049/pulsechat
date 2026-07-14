@@ -21,7 +21,9 @@ export type AuditEvent =
   | 'session_revoked'
   | 'account_deactivated'
   | 'account_deleted'
-  | 'account_restored';
+  | 'account_restored'
+  /** §6.2 — a rotated-away refresh token was replayed; every session was revoked. */
+  | 'refresh_token_reuse_detected';
 
 export async function recordAudit(
   userId: string,

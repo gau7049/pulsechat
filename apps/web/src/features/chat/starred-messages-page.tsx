@@ -113,7 +113,9 @@ function StarredRow({
                 ? '🎵 Voice message'
                 : envelope.type === 'post-share'
                   ? '📤 Shared post'
-                  : `📄 ${envelope.attachment.name}`;
+                  : envelope.type === 'story-reply'
+                    ? `↩️ ${envelope.text}`
+                    : `📄 ${envelope.attachment.name}`;
   }
 
   const inner = (

@@ -14,6 +14,18 @@ export function findActiveByRefreshHash(refreshTokenHash: string): Promise<Devic
   return prisma.device.findFirst({ where: { refreshTokenHash, revokedAt: null } });
 }
 
+/**
+ * §6.2 reused/stolen-token detection: a hash that matches the *previous*
+ * (already rotated-away) token on some device means that token is being
+ * replayed — the signal a plain "unknown hash" 401 can't distinguish from a
+ * genuinely expired/garbage token.
+ */
+export function findByPreviousRefreshHash(
+  previousRefreshTokenHash: string,
+): Promise<Device | null> {
+  return prisma.device.findFirst({ where: { previousRefreshTokenHash, revokedAt: null } });
+}
+
 export function findActiveById(id: string): Promise<Device | null> {
   return prisma.device.findFirst({ where: { id, revokedAt: null } });
 }
@@ -35,10 +47,18 @@ export function createDevice(data: {
   return prisma.device.create({ data });
 }
 
-export function rotateRefreshToken(deviceId: string, refreshTokenHash: string): Promise<Device> {
+export interface RefreshRotation {
+  refreshTokenHash: string;
+  /** The hash being replaced — recorded so a later replay of it is detectable. */
+  previousRefreshTokenHash: string | null;
+  rememberMe: boolean;
+  refreshExpiresAt: Date;
+}
+
+export function rotateRefreshToken(deviceId: string, rotation: RefreshRotation): Promise<Device> {
   return prisma.device.update({
     where: { id: deviceId },
-    data: { refreshTokenHash, lastSeenAt: new Date() },
+    data: { ...rotation, lastSeenAt: new Date() },
   });
 }
 
@@ -52,11 +72,11 @@ export function rotateRefreshToken(deviceId: string, refreshTokenHash: string): 
 export async function rotateRefreshTokenIfCurrent(
   deviceId: string,
   currentHash: string,
-  newHash: string,
+  rotation: Omit<RefreshRotation, 'previousRefreshTokenHash'>,
 ): Promise<boolean> {
   const result = await prisma.device.updateMany({
     where: { id: deviceId, refreshTokenHash: currentHash, revokedAt: null },
-    data: { refreshTokenHash: newHash, lastSeenAt: new Date() },
+    data: { ...rotation, previousRefreshTokenHash: currentHash, lastSeenAt: new Date() },
   });
   return result.count > 0;
 }

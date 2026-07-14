@@ -1,5 +1,6 @@
 import { ACCENTS, useTheme, type ThemeMode } from '../../app/theme';
 import { Button } from '../../components/ui/button';
+import { InstallAppCard } from '../pwa/install-app-card';
 
 const MODES: ThemeMode[] = ['light', 'system', 'dark'];
 
@@ -9,6 +10,7 @@ export function AppearanceSection() {
 
   return (
     <div className="flex flex-col gap-6">
+      <InstallAppCard />
       <div>
         <h3 className="mb-2 text-sm font-semibold text-fg">Theme</h3>
         <div

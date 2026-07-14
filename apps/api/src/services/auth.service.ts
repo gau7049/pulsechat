@@ -1,4 +1,4 @@
-import type { RegisterBody } from '@pulsechat/shared';
+import { LIMITS, type RegisterBody } from '@pulsechat/shared';
 import type { Device } from '@prisma/client';
 import { env } from '../config/env.js';
 import { AppError } from '../http/errors.js';
@@ -24,6 +24,7 @@ import {
   generateRefreshToken,
   signAccessToken,
   signPendingToken,
+  signStepUpToken,
   sha256,
 } from './token.service.js';
 
@@ -43,15 +44,34 @@ export interface IssuedSession {
   device: Device;
   accessToken: string;
   refreshToken: string;
+  rememberMe: boolean;
 }
 
-/** Every path that ends in "signed in" funnels through here. */
+/**
+ * §6.2 remember me: 30 days when the caller opted in, a short
+ * defense-in-depth cap otherwise (the browser-session cookie is the primary
+ * mechanism — this bounds a token that somehow outlives its cookie).
+ */
+export function computeRefreshExpiry(rememberMe: boolean): Date {
+  const ms = rememberMe
+    ? LIMITS.REMEMBER_ME_REFRESH_DAYS * 24 * 60 * 60 * 1000
+    : LIMITS.SESSION_ONLY_REFRESH_HOURS * 60 * 60 * 1000;
+  return new Date(Date.now() + ms);
+}
+
+/**
+ * Every path that ends in "signed in" funnels through here. `rememberMe`
+ * defaults true for flows that don't expose the choice (register, magic
+ * link, OTP-verified login already carries it through the pending token) —
+ * only the plain login form's checkbox can turn it off.
+ */
 export async function issueSession(
   user: UserWithPrivacy,
   deviceFingerprint: string,
   context: RequestContext,
-  options: { markRecognized: boolean },
+  options: { markRecognized: boolean; rememberMe?: boolean },
 ): Promise<IssuedSession> {
+  const rememberMe = options.rememberMe ?? true;
   let device = await devices.findActiveByFingerprint(user.id, deviceFingerprint);
   if (!device) {
     device = await devices.createDevice({
@@ -65,7 +85,12 @@ export async function issueSession(
   }
 
   const { token: refreshToken, tokenHash } = generateRefreshToken();
-  await devices.rotateRefreshToken(device.id, tokenHash);
+  await devices.rotateRefreshToken(device.id, {
+    refreshTokenHash: tokenHash,
+    previousRefreshTokenHash: device.refreshTokenHash,
+    rememberMe,
+    refreshExpiresAt: computeRefreshExpiry(rememberMe),
+  });
   const accessToken = await signAccessToken({
     sub: user.id,
     role: user.role,
@@ -75,7 +100,7 @@ export async function issueSession(
   // through — one instrumentation call site covers DAU/WAU + traffic (§13).
   void track('session_start', user.id);
 
-  return { user, device, accessToken, refreshToken };
+  return { user, device, accessToken, refreshToken, rememberMe };
 }
 
 // ── Registration ─────────────────────────────────────────────────────────────
@@ -115,7 +140,7 @@ export async function register(
   }
   if (body.inviteCode) {
     // §10.3: signing up through an invite connects the new user to the inviter.
-    await linkInviteOnRegister(user.id, body.inviteCode);
+    await linkInviteOnRegister(user, body.inviteCode);
   }
 
   await recordAudit(user.id, 'register', { ip: context.ip, device: context.userAgent });
@@ -147,6 +172,7 @@ export async function login(
   password: string,
   deviceFingerprint: string,
   context: RequestContext,
+  rememberMe: boolean,
 ): Promise<LoginOutcome> {
   const user = await users.findByUsername(username);
   const passwordOk = user ? await verifyPassword(user.passwordHash, password) : false;
@@ -180,7 +206,7 @@ export async function login(
   // the OTP already proves control of the registered email.
   if (currentUser.otpEnabled && currentUser.emailVerified && currentUser.email) {
     await issueOtp(currentUser.id, currentUser.email);
-    const pendingToken = await signPendingToken(currentUser.id, deviceFingerprint);
+    const pendingToken = await signPendingToken(currentUser.id, deviceFingerprint, rememberMe);
     return { kind: 'otp_required', pendingToken };
   }
 
@@ -195,6 +221,7 @@ export async function login(
 
   const session = await issueSession(currentUser, deviceFingerprint, context, {
     markRecognized: true,
+    rememberMe,
   });
   await recordAudit(currentUser.id, 'login', { ip: context.ip, device: context.userAgent });
   return { kind: 'session', session };
@@ -217,6 +244,7 @@ export async function verifyOtp(
   deviceFingerprint: string,
   code: string,
   context: RequestContext,
+  rememberMe: boolean,
 ): Promise<IssuedSession> {
   const live = await authTokens.findLiveOtp(userId);
   if (!live) throw new AppError('UNAUTHORIZED', 'Code expired — sign in again');
@@ -231,7 +259,10 @@ export async function verifyOtp(
 
   const user = await users.findById(userId);
   if (!user || user.status === 'deleted') throw new AppError('UNAUTHORIZED', 'Account unavailable');
-  const session = await issueSession(user, deviceFingerprint, context, { markRecognized: true });
+  const session = await issueSession(user, deviceFingerprint, context, {
+    markRecognized: true,
+    rememberMe,
+  });
   await recordAudit(user.id, 'login', { ip: context.ip, device: context.userAgent });
   return session;
 }
@@ -344,13 +375,48 @@ export async function verifyEmail(rawToken: string, context: RequestContext): Pr
 
 // ── Refresh / logout ─────────────────────────────────────────────────────────
 
+/**
+ * §6.2 reuse-detection grace window: two legitimate concurrent requests for
+ * the same pre-rotation token (e.g. React StrictMode's double effect-
+ * invocation — already handled below via the CAS) can also land as one
+ * request seeing the *other's* already-rotated result a few milliseconds
+ * later, which looks identical to token replay at the DB level. Only treat
+ * it as theft once it's well outside how long a genuine race could ever take.
+ */
+const REUSE_GRACE_MS = 5000;
+
 export async function refreshSession(
   rawRefreshToken: string,
   context: RequestContext,
 ): Promise<IssuedSession> {
   const currentHash = sha256(rawRefreshToken);
   const device = await devices.findActiveByRefreshHash(currentHash);
-  if (!device) throw new AppError('UNAUTHORIZED', 'Session expired — sign in again');
+  if (!device) {
+    // §6.2 reused/stolen-token detection: this hash isn't anyone's *current*
+    // token — check whether it's one that was already rotated away. A hit
+    // outside the grace window means the token is being replayed (theft
+    // signal a plain "unknown hash" can't distinguish from an ordinary
+    // expired/garbage token); a hit inside it is treated as a benign
+    // concurrent duplicate, same as the CAS race case below.
+    const reused = await devices.findByPreviousRefreshHash(currentHash);
+    if (reused && Date.now() - reused.lastSeenAt.getTime() > REUSE_GRACE_MS) {
+      await devices.revokeAllForUser(reused.userId);
+      await recordAudit(reused.userId, 'refresh_token_reuse_detected', {
+        ip: context.ip,
+        device: context.userAgent,
+      });
+      logger.warn(
+        { event: 'auth.refresh_reuse_detected', userId: reused.userId, deviceId: reused.id },
+        'refresh token reuse detected — all sessions revoked',
+      );
+    }
+    throw new AppError('UNAUTHORIZED', 'Session expired — sign in again');
+  }
+
+  if (device.refreshExpiresAt && device.refreshExpiresAt.getTime() < Date.now()) {
+    await devices.revokeDevice(device.id);
+    throw new AppError('UNAUTHORIZED', 'Session expired — sign in again');
+  }
 
   const user = await users.findById(device.userId);
   if (!user || user.status !== 'active') {
@@ -362,7 +428,11 @@ export async function refreshSession(
   // stale) token loses cleanly here instead of clobbering the winner's
   // rotation or getting a false "session expired" for a session that's
   // actually still fine on the other request.
-  const rotated = await devices.rotateRefreshTokenIfCurrent(device.id, currentHash, tokenHash);
+  const rotated = await devices.rotateRefreshTokenIfCurrent(device.id, currentHash, {
+    refreshTokenHash: tokenHash,
+    rememberMe: device.rememberMe,
+    refreshExpiresAt: computeRefreshExpiry(device.rememberMe),
+  });
   if (!rotated) {
     throw new AppError('UNAUTHORIZED', 'Session expired — sign in again');
   }
@@ -375,7 +445,7 @@ export async function refreshSession(
     { event: 'auth.refresh', userId: user.id, deviceId: device.id, ip: context.ip },
     'session refreshed',
   );
-  return { user, device, accessToken, refreshToken };
+  return { user, device, accessToken, refreshToken, rememberMe: device.rememberMe };
 }
 
 export async function logout(deviceId: string, context: RequestContext): Promise<void> {
@@ -384,6 +454,29 @@ export async function logout(deviceId: string, context: RequestContext): Promise
     await devices.revokeDevice(device.id);
     await recordAudit(device.userId, 'logout', { ip: context.ip, device: context.userAgent });
   }
+}
+
+// ── Step-up re-auth (§6.2) ───────────────────────────────────────────────────
+
+/**
+ * Re-confirms the current password and issues a short-lived step-up token,
+ * bound to this user + device, for sensitive endpoints that don't already
+ * inline a password check (`requireStepUp` middleware verifies it).
+ */
+export async function stepUp(
+  userId: string,
+  deviceId: string,
+  password: string,
+): Promise<{ stepUpToken: string }> {
+  const user = await users.findById(userId);
+  if (!user) throw new AppError('UNAUTHORIZED', 'Account unavailable');
+  const ok = await verifyPassword(user.passwordHash, password);
+  if (!ok) {
+    throw new AppError('VALIDATION_FAILED', 'Password is incorrect', {
+      password: ['Password is incorrect'],
+    });
+  }
+  return { stepUpToken: await signStepUpToken(userId, deviceId) };
 }
 
 function maskEmail(email: string): string {

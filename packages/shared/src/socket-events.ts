@@ -23,6 +23,8 @@ export const CLIENT_EVENTS = {
   /** Live-mesh viewer join/leave (§12). */
   LIVE_JOIN: 'live:join',
   LIVE_LEAVE: 'live:leave',
+  /** §24.15 live comments — ephemeral, friend-gated like LIVE_JOIN. */
+  LIVE_COMMENT: 'live:comment',
 } as const;
 
 export const SERVER_EVENTS = {
@@ -46,6 +48,10 @@ export const SERVER_EVENTS = {
   LIVE_ENDED: 'live:ended',
   LIVE_VIEWER_JOINED: 'live:viewer-joined',
   LIVE_VIEWER_LEFT: 'live:viewer-left',
+  /** §24.15 — a joining viewer's snapshot of who's already watching. */
+  LIVE_VIEWERS_SNAPSHOT: 'live:viewers-snapshot',
+  /** §24.15 — a new live comment, fanned out to the live room. */
+  LIVE_COMMENT: 'live:comment',
 } as const;
 
 export type ClientEventName = (typeof CLIENT_EVENTS)[keyof typeof CLIENT_EVENTS];

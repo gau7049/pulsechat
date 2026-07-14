@@ -408,19 +408,196 @@ Frontend:
   advance, heart-pop) and found nothing that bypasses it.
 
 All gates green: lint, format, typecheck, 114 API tests + 17 shared tests, both builds. This was
-the last milestone on the roadmap.
+the last milestone of the **original** handoff scope — see M9 below for a post-handoff addendum
+that arrived afterward.
+
+### ✅ M9 — Post-handoff addendum (Requirement §24) (DONE — awaiting user browser review)
+
+Commit `227c8a4` appended **Part VI / Part IX — Section 24** to both spec docs: nine new/changed
+requirements added after the original handoff, arriving once M0–M8 were already built.
+
+Schema: one additive migration `m9_post_handoff_addendum` — `Post.mediaUrl` → nullable,
+`Post.audience` enum (`everyone`/`friends`/`only_me`), `PostTag`, `Comment.likeCount` +
+`CommentLike`, `TrendingMovie`/`TrendingSong` cache tables, `PushSubscription.installedPwa`.
+`Notification.type` stayed a free-form `String` — the new values (`comment_like`, `tag`,
+`new_user_suggestion`) needed no migration.
+
+Backend (10 new tests in `m9.integration.test.ts`; 124 API tests + 17 shared tests total):
+
+- **24.1 text-only posts** — `createPostSchema` now accepts caption-only bodies (zod refine:
+  at least one of media/caption).
+- **24.2 tag people in posts** — `POST /posts` accepts `taggedUserIds[]`, silently dropped to
+  actual friends server-side (`filterToFriends`, mirrors the friend-gated forward-picker
+  pattern); fires a `tag` notification per tagged user; `DELETE /posts/:id/tags/me` for
+  self-removal only.
+- **24.3 trending movies & songs** — `trending.service.ts` refreshes TMDB + Deezer on an
+  in-process interval sweep (`startTrendingSweep`, same pattern as M5's status-expiry sweep),
+  not the GitHub Actions cron originally sketched — simpler and matches this codebase's
+  existing sweep idiom. TMDB is optional (no-op until `TMDB_API_KEY` lands, same pattern as
+  TURN/VAPID); Deezer needs no key. `GET /discover/movies` / `GET /discover/songs` serve from
+  the cache tables.
+- **24.4 WhatsApp-style reactions** — turned out to be **already fully correct at the DB/socket
+  layer** (M4's toggle/replace + the `message:reaction` delta is sufficient for clients to
+  reconstruct the full per-emoji reactor list locally); this item was actually a **frontend-only**
+  gap, closed below.
+- **24.5 notification center** — new `comment_like`/`tag`/`new_user_suggestion` types +
+  `postMediaUrl` in post-related payloads (added after user feedback, so the bell/page can show
+  a thumbnail of what was liked/commented/tagged, not just the actor's avatar). New-user-suggestion
+  fires from `linkInviteOnRegister` to the **inviter's other friends** — the only concrete graph
+  signal available at signup (a brand-new account has no friends of its own yet).
+  **Dedup fix (post-ship, from user feedback):** `notify()` now recognizes repeatable
+  actor+target events (`post_like`, `comment_like`) and refreshes the existing unread row
+  instead of stacking a duplicate when a user likes → unlikes → likes again while the first
+  notification is still unread; push only fires for genuinely new rows, not refreshes.
+- **24.6 comment likes** — `POST /comments/:id/like`, transactional counter mirroring M6's
+  post-like pattern exactly.
+- **24.7 post share audience** — every post read path (single post, hashtag/explore discovery,
+  profile grid) now applies `Post.audience` on top of the existing account-visibility gate,
+  never looser. **Real bug caught by the new tests and fixed before shipping**: the first cut of
+  `defaultAudienceFor()` mapped an account-`private` author's posts to `only_me` — but `private`
+  and `friends` accounts are already treated identically everywhere else in this codebase
+  (`assertProfileVisible` only ever distinguishes public from not-public), so that silently hid
+  a private user's posts from their own friends. Fixed: both default to `friends`; `only_me` is
+  purely a per-post choice with no account-level equivalent.
+- **24.8 private-profile visit rules** — confirmed already correct (profile stats were already
+  unfiltered real counts); the only change needed was 24.7's grid-level audience filter, plus a
+  test.
+
+Frontend:
+
+- Composer: photo now optional, per-post audience selector (defaults from account visibility),
+  friends-only tag picker reusing `GET /friends`.
+- Explore page: a "Trending" rail (movies + songs) above the ranked post feed, visually separate
+  per the spec's instruction not to conflate the two ranking systems; song rows get an inline
+  `<audio>` preview.
+- Chat: standalone long-press (touch) / hover (desktop) quick-reaction bar next to the bubble
+  (`QuickReactionBar`) — additive to the existing "⋯" menu's emoji row, not a replacement; a
+  "who reacted" view on the reaction chips using the conversation's own member list (no backend
+  change needed, per the 24.4 finding above).
+- Notifications: dedicated `/notifications` page (`NotificationsPage`), deep links per type
+  shared with the bell dropdown via `notification-utils.ts`; both now show a small thumbnail of
+  the liked/commented/tagged post's photo when the notification carries one.
+- Post/comment UI: comment-like button + count, tagged-user handles with a self-remove-tag
+  control on `PostCard`.
+- PWA: `manifest.webmanifest` + `index.html` link/meta tags + a placeholder `icon.svg` (real
+  PNG icons are a tracked follow-up asset, same pattern as M5's placeholder music catalog).
+  **Added after user feedback** (the manifest alone only makes the browser _capable_ of
+  installing — most users never notice the address-bar icon or dig into the browser menu): a
+  visible **"Install app"** button in Settings → Appearance, and a dismissible banner on the
+  home page, both driven by a `usePwaInstall` hook capturing `beforeinstallprompt`
+  (`features/pwa/`) with manual "Add to Home Screen" instructions on iOS, which never fires that
+  event.
+
+Two more fixes from the same user browser-review pass, unrelated to §24 itself but caught while
+reviewing M9's chat surface:
+
+- **Chat list preview showing raw envelope JSON for image messages** — `parseEnvelope` now
+  defensively unwraps a `type: 'text'` envelope whose `.text` is itself a serialized envelope
+  (a historical double-encoding produced exactly this "`{"v":1,"type":"image",...`" garbled
+  preview), instead of ever displaying raw JSON as message text.
+- **Tap-to-open image viewer** — chat images open a full-screen lightbox (`ImageLightbox`) with
+  WhatsApp-style Reply/Forward/Download actions, Escape-to-close and initial focus (same a11y
+  pattern M8 used for `CallOverlay`/`StatusViewer`); previously images were inline-only with no
+  reply/forward/download affordance once sent.
+
+All gates green: lint, format, typecheck, 124 API tests + 17 shared tests, both builds.
+
+### ✅ M10 — Session hardening & story/social extensions (Requirement §6.2, §24.10–§24.15) (DONE — awaiting user browser review)
+
+Another post-handoff addendum: session-management hardening (§6.2 "remember me") plus six more
+social/story features (§24.10–§24.15). Same situation as M9 — new requirement sections landed
+after the original build was underway.
+
+Schema: one additive migration `m10_session_and_story_extensions` — `Device` gains
+`rememberMe`/`refreshExpiresAt`/`previousRefreshTokenHash`; `StatusVisibility` gains
+`close_friends`; new `CloseFriend`, `StatusReaction`, `StatusPoll`/`StatusPollResponse` models.
+`Notification.type` needed no migration (free-form `String`, same as every prior addition). Live
+viewer list + comments are deliberately **not** persisted — ephemeral socket-only state, same
+precedent as typing indicators.
+
+Backend (7 new tests in `m10.integration.test.ts`; 131 API tests + 17 shared tests total):
+
+- **§6.2 remember me** — `loginBodySchema` gains `rememberMe`; `auth.service.ts#issueSession`
+  sets `Device.rememberMe`/`refreshExpiresAt` (30d when true, a 24h defense-in-depth cap when
+  false); `setRefreshCookie` omits `maxAge` (true browser-session cookie) when false instead of
+  the old unconditional 30-day cookie. **Reused/stolen token detection**: when a presented
+  refresh hash isn't anyone's _current_ token, it's checked against `Device.previousRefreshTokenHash`
+  — a hit means an already-rotated-away token is being replayed, so every device for that user
+  gets revoked + an audit entry recorded. **Real bug caught and fixed while writing the tests**:
+  a naive version of this flagged the codebase's own documented concurrent-refresh race (two
+  simultaneous requests presenting the same pre-rotation token, already CAS-protected) as theft
+  and revoked a brand-new legitimate session — fixed with a 5-second grace window, keyed off
+  `Device.lastSeenAt`, that only escalates to a revoke once a replay is well outside how long a
+  genuine race could ever take. **Step-up re-auth**: new `POST /auth/step-up` (password-
+  confirmed) + a `requireStepUp` middleware, applied to the two sensitive endpoints with no
+  password gate before — `DELETE /auth/devices/:id` and `POST /auth/otp/disable`
+  (`change-password`/deactivate/delete already inline a password check, so they're unchanged).
+- **§24.10 story replies/reactions** — `POST /statuses/:id/react` (toggle/replace, mirrors
+  `chat.service.ts`'s message-reaction toggle) → `StatusReaction` + `notify('story_reaction')`.
+  Replies needed **no new endpoint** — the client sends a normal `message:send` with a new
+  `story-reply` envelope kind carrying a story preview, reusing the encrypted chat pipeline
+  exactly like M6's `post-share` envelope.
+- **§24.11 saved posts** — confirmed already fully shipped in M6 (`Save` model, `/posts/saved`);
+  no new work, same as how M9 found §24.4/§24.8 already satisfied.
+- **§24.12 close friends list** — `POST/DELETE /close-friends/:userId`, `GET /close-friends`
+  (same CRUD shape as `Block`, only accepts an existing friend); `status.service.ts`'s audience
+  check extends so a `close_friends`-visibility status/live session is only shown to the author
+  or to viewers on the author's `CloseFriend` list (batched via `authorsWhoCloseFriended`, not
+  one query per feed row).
+- **§24.13 story polls/questions** — `POST /statuses` accepts an optional `poll` object
+  (kind/question/options) created transactionally with the `Status`; `POST
+/statuses/:id/poll/respond` (one response per viewer, upsert-by-PK) + `GET
+/statuses/:id/poll/results` (author-only aggregate tally or raw answers, 403 for anyone else).
+- **§24.14 friendship anniversary nudges** — a roughly-daily sweep in `social.service.ts` (same
+  `setInterval`-at-boot idiom as `status.service.ts`/`trending.service.ts`, plus one run at
+  boot) scans friendships for a `createdAt` month+day match against today and fires
+  `notify('friendship_anniversary')` to both members; dedupes against an existing notification
+  for the same pair within ~20h so a restart mid-day can't double-fire.
+- **§24.15 live viewer list + comments** — `rtc.handlers.ts` gains module-level `liveViewers`
+  (broadcasterId → viewer map, same shape/lifecycle as the existing `activeCalls` map) and a
+  bounded recent-comment ring buffer per broadcast. A joining viewer now gets a
+  `live:viewers-snapshot` of who's already watching plus a replay of recent comments, not just
+  future join/comment events; disconnecting without an explicit `live:leave` still prunes the
+  viewer and notifies the broadcaster. New friend-gated `live:comment` event, fanned out to the
+  `live:{broadcasterId}` room; cleared when the broadcast ends.
+
+Frontend:
+
+- Login page gains a "Remember me" checkbox; a new `StepUpProvider` (mounted in the app shell)
+  renders a password-confirm modal whenever a request comes back `STEP_UP_REQUIRED`, used by
+  session-revoke and 2FA-disable in `security-section.tsx` via a `runWithStepUp` retry helper.
+- `features/social/people-page.tsx`: a "Close Friends" tab (reuses the existing tabbed-list
+  pattern) to add/remove from the friends list; `status-composer.tsx` gained a `close_friends`
+  visibility option and a poll/question sticker builder.
+- `status-viewer.tsx`: a quick-reaction row (toggle, live count), poll voting UI with an
+  author-only results panel, and a reply field that finds-or-creates a direct conversation with
+  the story's author and sends a `story-reply` envelope through the existing chat-send hook
+  (`message-bubble.tsx`, `conversation-list.tsx`, `starred-messages-page.tsx` all gained a
+  render case for the new envelope kind).
+- `go-live-panel.tsx` / `live-viewer.tsx`: a live viewer-avatar strip and a comment feed + input
+  on both the broadcaster and viewer sides; the broadcaster now also joins its own live room so
+  it receives the same comment broadcasts the viewers do.
+- `features/notifications/notification-utils.ts`: copy + profile deep-links for the three new
+  types (`story_reaction`, `story_poll_response`, `friendship_anniversary`) — the bell and
+  `/notifications` page pick them up automatically through the existing per-type dispatch.
+
+No new "Pending manual setup" item — every §24.10–§24.15 piece is self-contained (no new
+external provider) and §6.2 is pure auth-flow logic.
+
+All gates green: lint, format, typecheck, 131 API tests + 17 shared tests, both builds.
 
 ## Environment / provider state
 
 | Item                    | Status                                                                                                                                  |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Supabase `DATABASE_URL` | ✅ in `.env`, migrations applied through `m7_suspended_status_and_restore_token`                                                        |
+| Supabase `DATABASE_URL` | ✅ in `.env`, migrations applied through `m10_session_and_story_extensions`                                                             |
 | JWT secrets             | ✅ dev values in `.env` (regenerate fresh ones in Render at deploy)                                                                     |
 | Turnstile site + secret | ✅ working                                                                                                                              |
 | Cloudinary              | ✅ working (avatar upload signed path)                                                                                                  |
 | Brevo                   | ⚠️ key in `.env` is an **SMTP** key (`xsmtpsib-`) — REST needs an **API** key (`xkeysib-`); until swapped, emails print to API terminal |
 | TURN (coturn)           | ⬜ code ships STUN-only-safe (M5 done); Oracle VM provisioning still pending, see below                                                 |
 | VAPID                   | ⬜ code ships push-ready (M7 done); keys not yet generated — Web Push is a no-op until they land                                        |
+| TMDB                    | ⬜ code ships trending-safe (M9 done); no key yet — sweep skips movies, keeps Deezer songs fresh                                        |
 | Deploy accounts         | ⬜ not needed until deploy                                                                                                              |
 
 ## Pending manual setup (owner-tracked, not blocking coding)
@@ -450,6 +627,19 @@ convenient; tell the agent the resulting values/files when ready and it will wir
   `pnpm exec playwright install chromium`. Not run automatically (see M8: build-script approval
   was deliberately declined for `@playwright/browser-chromium` in `pnpm-workspace.yaml`, so this
   stays an explicit, deliberate step).
+- ⬜ **TMDB API key** (needed by M9 §24.3 for trending movies) — free-tier signup at
+  themoviedb.org, then `TMDB_API_KEY` in `.env`. Deezer (trending songs) needs no key. M9's
+  trending-cache job can ship and be tested against Deezer alone in the meantime, same
+  no-op-until-configured pattern used elsewhere in this doc.
+- ⬜ **PWA real-device install testing** (needed by M9 §24.9 close-out) — one real Android
+  device and one real iOS device: verify install prompt/home-screen icon, offline shell load,
+  push delivery in the installed/standalone context, camera/attachment picker, and touch-target
+  sizing. Manual step, no paid device-farm service.
+- ⬜ **Real PNG app icons** (M9 shipped `apps/web/public/icon.svg`, a simple placeholder mark,
+  referenced from both the manifest and `apple-touch-icon`) — Android/Chrome/Edge accept an SVG
+  manifest icon fine, but iOS's Add-to-Home-Screen icon support for SVG is inconsistent across
+  versions. Swap in real 192px/512px PNGs (plus a dedicated apple-touch-icon PNG) once real
+  branding art exists — a data-only asset swap, same pattern as M5's placeholder music catalog.
 
 ## Working agreements
 
@@ -567,3 +757,63 @@ convenient; tell the agent the resulting values/files when ready and it will wir
   "Working agreements" for the detailed diagnosis). All gates green (lint, format, typecheck,
   tests, both builds). Pending: user browser walkthrough of the full app (M2–M8) — the last one,
   since M8 is the final roadmap milestone.
+- **2026-07-12 (later still)** — Found that commit `227c8a4` ("test verified") had appended a
+  post-handoff addendum (Requirement §24 / Technical Spec Part VI) to both spec docs after M0–M8
+  were already built: nine new/changed requirements (text-only posts, post tagging, trending
+  movies/songs, richer message reactions, a real notification center, comment likes, per-post
+  audience, private-profile visit-rule clarification, PWA installability). Cross-checked each
+  against the current codebase and added a planned **M9** section to this file (schema/backend/
+  frontend bullets, gap table, two new external deps — TMDB + Deezer) plus two new "Pending
+  manual setup" bullets (TMDB key, PWA real-device testing). Planning only — no M9 code written
+  yet; M8's own user-review walkthrough is still outstanding and unaffected by this addition.
+- **2026-07-14** — M9 built on user go-ahead ("Go ahead to integrate new planed scope"): all
+  nine §24 items (text-only posts, post tagging, comment likes, per-post audience + private-
+  profile visit rules, notification center additions, trending movies/songs, richer message
+  reactions, installable PWA). One additive migration (`m9_post_handoff_addendum`). 10 new API
+  tests → 124 API tests, 17 shared tests total. Caught and fixed a real bug the new tests
+  surfaced before shipping: an account-`private` author's posts defaulted to post-audience
+  `only_me` (visible to no one, not even friends) instead of `friends` — wrong, since `private`
+  and `friends` accounts are already treated identically everywhere else in this codebase.
+  24.4 (message reactions) turned out to already be correct at the DB/socket layer from M4 —
+  only the frontend needed the standalone quick-reaction bar the spec called for. All gates
+  green (lint, format, typecheck, tests, both builds).
+  User then reviewed the M9 chat/notification/PWA surfaces live and reported three issues, fixed
+  in the same session: (1) liking → unliking → liking a post stacked duplicate "X liked your
+  post" notifications while the first stayed unread — `notify()` now dedupes repeatable
+  actor+target events by refreshing the existing unread row instead; post-related notifications
+  also gained a `postMediaUrl` thumbnail. (2) the chat list's last-message preview showed raw
+  envelope JSON for an image message (a historical double-encoded envelope) — `parseEnvelope`
+  now defensively unwraps a `text`-typed envelope whose own `.text` is itself serialized JSON.
+  (3) chat images had no tap-to-view — added a full-screen `ImageLightbox` with WhatsApp-style
+  Reply/Forward/Download actions. Separately, the user asked where the "install as app" control
+  was — the M9 manifest/service-worker only made installation _possible_, with no visible UI
+  trigger — added a real "Install app" button (Settings → Appearance) and a dismissible home-page
+  banner, both driven by a new `usePwaInstall` hook capturing `beforeinstallprompt`, with manual
+  iOS instructions since Safari never fires that event. Re-ran the full gate afterward (one
+  spurious vitest worker crash on a re-run, unrelated to the changes — confirmed clean on retry).
+  Pending: user browser walkthrough of the fixes just applied, plus M2–M9 overall — M9 is the
+  last roadmap item beyond the original M0–M8 handoff scope.
+- **2026-07-14 (later)** — User dropped another batch of new requirements: §6.2 ("remember me"
+  session hardening — session-only vs. 30-day refresh tokens, reused/stolen-token revocation,
+  step-up re-auth) plus §24.10–§24.15 (story replies/reactions, saved posts, close friends list,
+  story polls/questions, friendship anniversary nudges, live viewer list + comments). Checked
+  each against the current codebase and added a planned **M10** section to this file — found
+  §24.11 (saved posts) already fully shipped in M6, same as M9's discovery that §24.4/§24.8 were
+  already satisfied. Planning only — no M10 code written yet; the M2–M9 browser walkthrough is
+  still outstanding and unaffected by this addition.
+- **2026-07-15** — M10 built on user go-ahead ("Implement M10 plan now"): remember-me session
+  hardening (§6.2 — session-only vs. 30-day refresh cookies, reused/stolen-token detection,
+  step-up re-auth for session-revoke/2FA-disable), close friends list (§24.12), story reactions
+  (§24.10), story polls/questions (§24.13), friendship anniversary nudges (§24.14), and live
+  viewer list + comments (§24.15). One additive migration
+  (`m10_session_and_story_extensions`). 7 new API tests → 131 API tests, 17 shared tests total.
+  Caught and fixed a real bug the new tests surfaced before shipping: the first cut of the
+  reused-refresh-token detector flagged the codebase's own documented concurrent-refresh race
+  (two simultaneous requests presenting the same pre-rotation token — already handled by the
+  existing CAS rotation) as theft and revoked a brand-new legitimate session; fixed with a
+  5-second grace window keyed off `Device.lastSeenAt`, confirmed against both the new reuse test
+  and the pre-existing concurrent-refresh regression test. Story replies reuse the encrypted
+  chat pipeline via a new `story-reply` envelope kind, the same pattern M6 used for `post-share`.
+  All gates green (lint, format, typecheck, 131 API + 17 shared tests, both builds). Pending:
+  user browser walkthrough of M10, plus M2–M9 overall — M10 is the last roadmap item beyond the
+  original M0–M8 handoff scope.

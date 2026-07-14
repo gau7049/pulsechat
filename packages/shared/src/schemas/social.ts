@@ -101,6 +101,12 @@ export interface BlockedUserDto {
   blockedAt: string;
 }
 
+/** §24.12 close friends list — a private story-audience tier, not a friendship itself. */
+export interface CloseFriendDto {
+  user: UserSummaryDto;
+  addedAt: string;
+}
+
 /** POST /invites — the caller's shareable invite code (§10.3). */
 export interface InviteDto {
   code: string;

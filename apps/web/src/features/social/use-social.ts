@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   BlockedUserDto,
+  CloseFriendDto,
   FriendDto,
   FriendRequestDto,
   InviteDto,
@@ -22,6 +23,7 @@ const keys = {
   friends: ['social', 'friends'] as const,
   suggestions: ['social', 'suggestions'] as const,
   blocked: ['social', 'blocked'] as const,
+  closeFriends: ['social', 'close-friends'] as const,
   profile: (username: string) => ['social', 'profile', username.toLowerCase()] as const,
   invite: ['social', 'invite'] as const,
 };
@@ -133,5 +135,30 @@ export function useUnblockUser() {
   return useMutation({
     mutationFn: (userId: string) => del<{ ok: true }>(`/blocks/${userId}`),
     onSuccess: invalidate,
+  });
+}
+
+// ── Close friends (§24.12) ───────────────────────────────────────────────────
+
+export function useCloseFriends() {
+  return useQuery({
+    queryKey: keys.closeFriends,
+    queryFn: () => get<{ items: CloseFriendDto[] }>('/close-friends'),
+  });
+}
+
+export function useAddCloseFriend() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => post<{ ok: true }>(`/close-friends/${userId}`),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: keys.closeFriends }),
+  });
+}
+
+export function useRemoveCloseFriend() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => del<{ ok: true }>(`/close-friends/${userId}`),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: keys.closeFriends }),
   });
 }

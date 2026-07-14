@@ -30,10 +30,18 @@ export function configureWebPush(): void {
 }
 
 export async function subscribe(userId: string, body: PushSubscribeBody): Promise<void> {
+  // §24.9 — distinguishes installed/standalone usage from an open browser tab.
+  const installedPwa = body.installedPwa ?? false;
   await prisma.pushSubscription.upsert({
     where: { endpoint: body.endpoint },
-    create: { endpoint: body.endpoint, userId, p256dh: body.keys.p256dh, auth: body.keys.auth },
-    update: { userId, p256dh: body.keys.p256dh, auth: body.keys.auth },
+    create: {
+      endpoint: body.endpoint,
+      userId,
+      p256dh: body.keys.p256dh,
+      auth: body.keys.auth,
+      installedPwa,
+    },
+    update: { userId, p256dh: body.keys.p256dh, auth: body.keys.auth, installedPwa },
   });
 }
 

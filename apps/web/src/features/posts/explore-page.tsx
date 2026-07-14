@@ -3,9 +3,14 @@ import { EmptyState } from '../../components/ui/empty-state';
 import { Skeleton } from '../../components/ui/skeleton';
 import { useAuth } from '../auth/auth-context';
 import { PostCard } from './post-card';
+import { TrendingSection } from './trending-section';
 import { useExploreFeed } from './use-posts';
 
-/** §13.7 discover feed — trending/suggested public posts. */
+/**
+ * §13.7 discover feed — ranked public posts. §24.3 adds a "Trending" rail
+ * above the feed grid for movies/songs — a separate discovery surface from
+ * this ranked post feed, never conflated with its engagement-based ranking.
+ */
 export function ExplorePage() {
   const { user } = useAuth();
   const feed = useExploreFeed();
@@ -16,6 +21,8 @@ export function ExplorePage() {
   return (
     <main className="mx-auto flex w-full max-w-xl flex-col gap-4 px-4 py-8">
       <h1 className="text-2xl font-bold text-fg">Explore</h1>
+
+      <TrendingSection />
 
       {feed.isLoading && (
         <div aria-hidden className="flex flex-col gap-4">

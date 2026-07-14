@@ -100,6 +100,12 @@ Indexes: `users(username)`, `messages(conversation_id, sequence)`, `posthashtag(
 - Email OTP 2FA: 6-digit code emailed via Brevo, checked server-side with attempt limiting.
 - New-device flow: device fingerprint (hashed UA + coarse network signal) checked against known Device rows for the account; unrecognized fingerprint creates a "pending" session, emails a confirm link, and only marks the device recognized once clicked (Section 6.6).
 - Brute-force protection: exponential backoff + temporary lockout keyed by username+IP, tracked in the same in-process cache used for rate limiting.
+- **Remember me (Requirement Section 6.2), unchecked by default:**
+  - Unchecked: refresh token issued with a short expiry matching the browser session (no persistent cookie flag) — Device/Session row's expires_at set to session-scope; token is discarded client-side on browser close, same as today's default flow.
+  - Checked: refresh token issued with expires_at = now + 30 days and persisted client-side (httpOnly, SameSite=Strict cookie); Device/Session row stores this expiry so the server enforces the 30-day cap independent of the client.
+  - Both cases use the identical rotating-refresh-token mechanism already described above — "remember me" only changes the token's lifetime, not its type or storage mechanism, so no new credential class is introduced.
+  - The Device/Session list (Section 6.5, GET /auth/devices) surfaces remembered sessions like any other; revoking one immediately invalidates that refresh token server-side, regardless of its remaining 30-day window.
+  - Sensitive actions (password/email/privacy changes) always re-prompt for the password via a short-lived step-up check, even on a remembered session — this reuses the existing auth middleware with a re_authenticated_at claim rather than a separate step-up service.
 
 ### 6. Encryption-at-Rest Design
 
@@ -130,7 +136,7 @@ Implements Section 20's requirement that message content never be readable serve
 
 | Group | Representative endpoints |
 |---|---|
-| Auth | POST /auth/register · POST /auth/login · POST /auth/magic-link · POST /auth/magic-link/verify · POST /auth/otp/verify · POST /auth/refresh · POST /auth/logout · GET /auth/devices · DELETE /auth/devices/:id |
+| Auth | POST /auth/register · POST /auth/login (body includes rememberMe: boolean) · POST /auth/magic-link · POST /auth/magic-link/verify · POST /auth/otp/verify · POST /auth/refresh · POST /auth/logout · GET /auth/devices · DELETE /auth/devices/:id |
 | Profile | GET /users/:username · PATCH /users/me · PATCH /users/me/privacy · POST /users/me/avatar-upload-token |
 | Search & Friends | GET /search/users?q= · POST /friend-requests · PATCH /friend-requests/:id · GET /friends · GET /friends/suggestions · POST /blocks · DELETE /blocks/:id |
 | Invites | POST /invites · GET /invites/:code |
@@ -341,3 +347,63 @@ Internal implementation order — the release itself ships as one unit (Requirem
 ### 23. Revised Build Sequence (M9)
 
 - **M9 —** text-only posts, post tagging, comment likes, post audience + private-profile visit-rule filtering, notification center consolidation, trending movies/songs (cache job + endpoints + UI), PWA manifest/install/testing pass
+
+
+## Part VII — Post-Handoff Addendum II (Requirement Sections 24.10–24.15)
+
+### 24. Data Model Additions
+
+| Entity / change | Key fields | Backs requirement |
+|---|---|---|
+| StatusReply | id, status_id, viewer_id, kind (emoji/text), body, created_message_id, created_at | 24.10 Story replies/reactions — created_message_id links to the DM it materialized as |
+| Save (formalized) | Already in Section 4; no schema change, only a dedicated GET /saved endpoint + UI surface | 24.11 Saved/bookmarked posts |
+| CloseFriend | owner_id, friend_id, created_at (unique on owner_id+friend_id) | 24.12 Close Friends list |
+| Status.audience extension | Status.visibility enum gains a close_friends value alongside everyone/friends | 24.12; also added to Post.audience (Section 21) for posts |
+| StatusPoll / StatusPollOption / StatusPollVote | StatusPoll(id, status_id, question, is_open_question); StatusPollOption(id, poll_id, label); StatusPollVote(poll_id, option_id nullable, voter_id, text_answer nullable, created_at) | 24.13 Polls & questions in stories — option_id null + text_answer set = open-question answer |
+| Friendship.anniversary_notified_year | Int column on Friendship, last year a nudge was sent | 24.14 — prevents duplicate nudges if the sweep job reruns same day |
+| LiveViewer | live_session_id, user_id, joined_at, left_at (nullable) | 24.15 Live viewer list/count — row lifetime = one viewing session |
+| LiveComment | id, live_session_id, user_id, body, created_at | 24.15 Live comments |
+| Notification.type additions | New values: status_reply, status_reaction, poll_vote, question_answer, friend_anniversary | 24.10, 24.13, 24.14 |
+
+### 25. Feature Implementation Notes
+
+#### 25.1 Story Replies & Reactions (24.10)
+
+- Reply/react UI calls a single POST /statuses/:id/reply {kind, body}; server first checks the viewer is within the status's audience (everyone/friends/close_friends — same guard as viewing it), then creates a direct Conversation (or reuses the existing one) between viewer and poster and inserts a Message carrying the reply, exactly like any other DM — no separate reply data path to keep in sync
+- StatusReply row is a thin audit/link record only (status_id → created_message_id) so the status view can show "12 replies" and the poster can jump straight into chat from the status screen
+- Emoji-only reaction reuses the same endpoint with kind: "emoji" — it is still a real DM (matches the requirement's "becomes a direct message" language), just typically a one-emoji message
+
+#### 25.2 Saved / Bookmarked Posts (24.11)
+
+- No new table — this formalizes the existing Save entity (Section 4) and POST /posts/:id/save endpoint (Section 8) into its own first-class surface: GET /saved (cursor-paginated, like every other list) plus a "Saved" entry point in the profile menu
+- Save/un-save never touches Notification or any counter visible to others, matching the privacy requirement
+
+#### 25.3 Close Friends List (24.12)
+
+- PUT /me/close-friends {friend_ids[]} replaces the caller's CloseFriend rows in one transaction (simplest correct semantics for a small, privately-curated list)
+- Visibility check order for close_friends-scoped content: viewer must already be an accepted Friendship AND have a CloseFriend row owned by the poster — same evaluation point as the existing friends-only check (Section 12/24.7), just one extra join
+- No audit trail, no Notification, and the list is excluded from every admin/analytics query — enforced by simply never joining CloseFriend into anything but the owner's own visibility checks
+
+#### 25.4 Polls & Questions in Stories (24.13)
+
+- POST /statuses accepts an optional poll: {question, options[]} (2+ options) or {question, isOpenQuestion: true} — creates the Status plus its StatusPoll/StatusPollOption rows in one transaction
+- POST /statuses/:id/poll/vote {optionId} for a closed poll, or {textAnswer} for an open question; both insert a StatusPollVote gated by the same audience check as 25.1
+- Open-question answers additionally emit a question_answer Notification and are viewable inline on the poster's own status detail (not a DM like 24.10, since the requirement keeps aggregate results in the status view) — voters remain visible only to the poster, never to other viewers
+- Poll results are computed at read time (COUNT grouped by option_id) — no denormalized counters needed at this scale
+
+#### 25.5 Friendship Streaks & Anniversary Nudges (24.14)
+
+- Daily scheduled job (same GitHub Actions cron pattern as status-expiry sweep and trending-content refresh) scans Friendship rows whose created_at month/day matches today and anniversary_notified_year != current year
+- For each match, inserts one friend_anniversary Notification per side of the friendship and sets anniversary_notified_year, so a rerun same day is a no-op
+- Explicitly no new counters, scores, or streak-length tracking — the job only ever needs Friendship.created_at, nothing else
+
+#### 25.6 Live Viewer Visibility & Comments (24.15)
+
+- Joining a live view emits a live:viewer-join socket event (extends the catalog, Section 9); server upserts a LiveViewer row (joined_at) and broadcasts an updated live:viewer-count to the room; leaving/disconnect sets left_at and decrements the same way
+- live:viewer-list request returns current watchers (LiveViewer where left_at is null) for the broadcaster's "who's watching" panel — restricted server-side to the session's owner only
+- Comments use a lightweight live:comment socket event, persisted to LiveComment and fanned out to everyone currently in the room; unlike chat messages, live comments are plaintext (ephemeral, room-scoped, not private DM content, so the encryption-at-rest requirement in Section 20 doesn't apply) and are pruned along with the LiveSession row once the broadcast ends
+- All of the above is gated by the live session's existing audience setting (friends/everyone, Section 12) — the same membership check used to allow a socket into the room at all
+
+### 26. Revised Build Sequence (M10)
+
+- **M10 —** story replies/reactions (DM bridge), saved-posts surface, close friends list, story polls/questions, friendship anniversary nudge job, live viewer list/count + live comments

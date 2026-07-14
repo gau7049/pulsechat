@@ -45,8 +45,16 @@ export const loginBodySchema = z.object({
   turnstileToken: z.string().min(1).optional(),
   /** Stable per-browser identifier for the §6.6 new-device check. */
   deviceFingerprint: z.string().min(8).max(128),
+  /** §6.2 — session-only (browser-session cookie) when false, 30-day when true. */
+  rememberMe: z.boolean().default(false),
 });
 export type LoginBody = z.infer<typeof loginBodySchema>;
+
+/** POST /auth/step-up (§6.2) — a short-lived re-auth claim for sensitive actions. */
+export const stepUpSchema = z.object({
+  password: z.string().min(1, 'Password is required'),
+});
+export type StepUpBody = z.infer<typeof stepUpSchema>;
 
 export const magicLinkRequestSchema = z.object({
   email: recoveryEmailSchema,

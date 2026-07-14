@@ -82,7 +82,12 @@ Optional: email address for account recovery.
 ### 6.2 Login
 
 Users log in with username and password.
-- If a verified email is on file, login also supports a magic-link flow: a one-time sign-in link is emailed to the user and opens the browser already logged in. Recommended over a manually-typed OTP — one tap, nothing to mistype, and it reuses the same email-verification channel already required elsewhere in this spec.
+- If a verified email is on file, login also supports a magic-link flow: a one-time sign-in link is emailed to the user and opens the browser already logged in. Recommended over a manually-typed OTP 
+- "Remember me" checkbox on the login form, unchecked by default:
+  - Unchecked (default): session ends when the browser is closed (short-lived session cookie/token), consistent with industry norms
+  - Checked: session persists across browser restarts via a long-lived refresh token, capped at 30 days, after which the user must log in again
+  - Refresh token is a separate, revocable credential — not the account password — and is stored the same secure way as other session tokens (Section 6.4); revoking it from the active-sessions list (Section 6.5) signs that device out immediately
+  - Re-authentication is still required for sensitive actions (e.g. changing password, email, or privacy settings) even on a remembered/logged-in session— one tap, nothing to mistype, and it reuses the same email-verification channel already required elsewhere in this spec.
 
 ### 6.3 Password Management
 - Change password
@@ -561,3 +566,43 @@ The application must be installable to a phone's home screen and run like a nati
 - Push notifications work the same way from the installed app as from the browser tab (Section 17), using the free browser Push API — no paid push service
 - Every feature must be tested and verified on an actual installed mobile instance (Android and iOS home-screen install), not just in a desktop browser tab — install flow, offline behavior, notifications, camera/attachment access (Section 14.8), and layout/touch targets all re-verified in that installed context before sign-off
 - Data stays fully consistent between the installed app and the plain browser tab — same accounts, same database, same real-time socket connection (Section 21.1); there is no separate "app-only" data store, so a message, post, or friend action taken in one shows up identically in the other
+
+### 24.10 Stories Replies & Reactions
+
+Extends status updates (Section 12) with a response channel, matching common story behavior:
+- Viewer can send a quick emoji reaction or a typed text reply to a status; either becomes a direct message to the poster (does not post publicly)
+- Poster sees who reacted/replied and can respond via chat as normal
+- Reply/react entry point respects the status's existing visibility rules (Section 12) — only viewers who can already see the status can react to it
+
+### 24.11 Saved / Bookmarked Posts
+
+- User can save any post they can view to a private "Saved" collection
+- Saving is private — the post's author is not notified and save counts are not shown publicly
+- Saved collection is accessible only to the user who saved it, from their own profile/menu
+- Un-saving removes it from the collection at any time
+
+### 24.12 Close Friends List
+
+A finer-grained visibility tier than Friends Only (Sections 8 & 24.7), for status updates and posts:
+- User can curate a private "Close Friends" list, a subset of their accepted friends (Section 10)
+- Status updates (Section 12) and posts (Section 24.7) can be shared to "Close Friends" only, instead of Everyone/Friends/Only Me
+- List membership is private — nobody is notified when added or removed, and the list is never visible to anyone but its owner
+
+### 24.13 Polls & Questions in Stories
+
+- When creating a status update (Section 12), user can attach a simple poll (2+ options, tap to vote) or an open question prompt
+- Viewers vote or answer inline on the status; a question prompt's answers go to the poster as direct messages (same delivery model as Section 24.10)
+- Poster can see aggregate poll results and individual respondents on their own status
+- Follows the status's existing visibility/audience rules (Section 12, extended by Section 24.12 for Close Friends)
+
+### 24.14 Friendship Streaks & Anniversary Nudges
+
+- Lightweight, non-gamified nudge (e.g. "You and [friend] have been friends for 1 year") surfaced in the notification center (Section 24.5) on the friendship anniversary
+- No streak counters, scores, or leaderboards — a single occasional nudge only, not a daily-engagement mechanic
+
+### 24.15 Live Viewer Visibility & Comments
+
+Extends live streaming (Section 12/live-to-friends-or-everyone) with viewer transparency:
+- Live stream shows a real-time watching count
+- Broadcaster can open a list of who is currently watching, by name/handle
+- Anyone currently watching can post comments visible to the broadcaster and other viewers in real time, scoped to the stream's audience setting (friends-only or everyone)

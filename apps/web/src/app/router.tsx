@@ -18,6 +18,7 @@ import { HomePage } from '../features/home/home-page';
 import { ChatsPage } from '../features/chat/chats-page';
 import { StarredMessagesPage } from '../features/chat/starred-messages-page';
 import { PrivacyPolicyPage, TermsPage } from '../features/legal/legal-pages';
+import { NotificationsPage } from '../features/notifications/notifications-page';
 import { ExplorePage } from '../features/posts/explore-page';
 import { HashtagPage } from '../features/posts/hashtag-page';
 import { LikedPostsPage } from '../features/posts/liked-posts-page';
@@ -72,6 +73,7 @@ export const router = createBrowserRouter([
               { path: 'chats', element: <ChatsPage /> },
               { path: 'chats/starred', element: <StarredMessagesPage /> },
               { path: 'chats/:id', element: <ChatsPage /> },
+              { path: 'notifications', element: <NotificationsPage /> },
               { path: 'explore', element: <ExplorePage /> },
               { path: 'hashtag/:tag', element: <HashtagPage /> },
               { path: 'p/:id', element: <PostDetailPage /> },

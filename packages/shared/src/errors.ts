@@ -24,6 +24,8 @@ export const ERROR_CODES = [
   'RATE_LIMITED',
   'PAYLOAD_TOO_LARGE',
   'INTERNAL',
+  /** §6.2 — a sensitive action needs a fresh password re-confirmation first. */
+  'STEP_UP_REQUIRED',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -37,4 +39,5 @@ export const ERROR_STATUS: Record<ErrorCode, number> = {
   PAYLOAD_TOO_LARGE: 413,
   RATE_LIMITED: 429,
   INTERNAL: 500,
+  STEP_UP_REQUIRED: 403,
 };

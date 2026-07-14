@@ -3,7 +3,7 @@ import type { InviteDto, InviteLookupDto } from '@pulsechat/shared';
 import { logger } from '../lib/logger.js';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../http/errors.js';
-import { sendFriendRequest } from './social.service.js';
+import { notifySuggestedConnections, sendFriendRequest } from './social.service.js';
 import { toUserSummaryDto } from './user-summary.serializer.js';
 
 /**
@@ -38,19 +38,28 @@ export async function lookupInvite(code: string): Promise<InviteLookupDto> {
 }
 
 /**
- * Post-registration hook: connect the new user to their inviter (§10.3).
- * Best-effort — a stale code must never fail the signup that carried it.
+ * Post-registration hook: connect the new user to their inviter (§10.3), and
+ * — §24.5 — notify the inviter's other friends that someone they may know
+ * just joined. Best-effort — a stale code must never fail the signup that
+ * carried it.
  */
-export async function linkInviteOnRegister(newUserId: string, code: string): Promise<void> {
+export async function linkInviteOnRegister(
+  newUser: { id: string; username: string; displayName: string; avatarUrl: string | null },
+  code: string,
+): Promise<void> {
   try {
     const invite = await prisma.invite.findUnique({ where: { code }, include: { user: true } });
-    if (!invite || invite.user.status !== 'active' || invite.userId === newUserId) return;
-    await sendFriendRequest(newUserId, invite.userId, { viaInvite: true });
+    if (!invite || invite.user.status !== 'active' || invite.userId === newUser.id) return;
+    await sendFriendRequest(newUser.id, invite.userId, { viaInvite: true });
     logger.info(
-      { event: 'invite.linked', inviterId: invite.userId, newUserId },
+      { event: 'invite.linked', inviterId: invite.userId, newUserId: newUser.id },
       'invite linked to signup',
     );
+    void notifySuggestedConnections(invite.userId, newUser);
   } catch (error) {
-    logger.warn({ event: 'invite.link_failed', newUserId, err: error }, 'invite link failed');
+    logger.warn(
+      { event: 'invite.link_failed', newUserId: newUser.id, err: error },
+      'invite link failed',
+    );
   }
 }

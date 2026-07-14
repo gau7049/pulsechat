@@ -68,6 +68,8 @@ model User {
   friendshipsB        Friendship[]    @relation("FriendB")
   blocksMade          Block[]         @relation("Blocker")
   blocksReceived      Block[]         @relation("Blocked")
+  closeFriendsOwned   CloseFriend[]   @relation("CloseFriendOwner")
+  closeFriendOf       CloseFriend[]   @relation("CloseFriendFriend")
   authTokens          AuthToken[]
   conversationMembers ConversationMember[]
   messages            Message[]
@@ -76,9 +78,13 @@ model User {
   stars               MessageStar[]
   messageHides        MessageHide[]
   statuses            Status[]
+  statusReactions     StatusReaction[]
+  statusPollResponses StatusPollResponse[]
   liveSessions        LiveSession[]
   posts               Post[]
+  postTags            PostTag[]
   comments            Comment[]
+  commentLikes        CommentLike[]
   likes               Like[]
   saves               Save[]
   reports             Report[]
@@ -113,6 +119,8 @@ enum LastSeenVisibility {
 enum StatusVisibility {
   everyone
   friends
+  /// §24.12 — restricts a status/live session to the author's CloseFriend list.
+  close_friends
 }
 
 /// Device/session row backing refresh-token rotation, session revocation, and
@@ -121,6 +129,15 @@ model Device {
   id                String    @id @default(uuid())
   userId            String    @map("user_id")
   refreshTokenHash  String?   @map("refresh_token_hash")
+  /// §6.2 remember-me: session-only tokens get a short server-side cap even
+  /// though the cookie itself already drops on browser close (defense in depth).
+  rememberMe        Boolean   @default(true) @map("remember_me")
+  refreshExpiresAt  DateTime? @map("refresh_expires_at")
+  /// §6.2 reused/stolen-token detection: the hash a rotation just replaced.
+  /// A refresh request presenting this hash again means an already-consumed
+  /// token is being replayed — the signal a plain CAS-miss can't distinguish
+  /// from an ordinary expired/unknown token.
+  previousRefreshTokenHash String? @map("previous_refresh_token_hash")
   deviceFingerprint String    @map("device_fingerprint")
   userAgent         String    @map("user_agent")
   recognized        Boolean   @default(false)
@@ -131,6 +148,7 @@ model Device {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([previousRefreshTokenHash])
   @@map("devices")
 }
 
@@ -216,6 +234,22 @@ model Block {
   @@id([blockerId, blockedId])
   @@index([blockedId])
   @@map("blocks")
+}
+
+/// §24.12 close friends list — a private, directional subset of a user's
+/// friends used as a story audience tier. Not itself a friendship: an entry
+/// with no matching `Friendship` row is simply ignored by the audience check.
+model CloseFriend {
+  ownerId   String   @map("owner_id")
+  friendId  String   @map("friend_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  owner  User @relation("CloseFriendOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  friend User @relation("CloseFriendFriend", fields: [friendId], references: [id], onDelete: Cascade)
+
+  @@id([ownerId, friendId])
+  @@index([friendId])
+  @@map("close_friends")
 }
 
 /// Personal invite link (Requirement Scope §10.3).
@@ -387,10 +421,69 @@ model Status {
   expiresAt    DateTime         @map("expires_at")
   createdAt    DateTime         @default(now()) @map("created_at")
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reactions StatusReaction[]
+  poll      StatusPoll?
 
   @@index([userId, expiresAt])
   @@map("statuses")
+}
+
+/// §24.10 story reactions — one reaction per viewer per story, same shape as
+/// `MessageReaction`. Cascades away with the status at expiry/deletion.
+model StatusReaction {
+  statusId  String   @map("status_id")
+  userId    String   @map("user_id")
+  emoji     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  status Status @relation(fields: [statusId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([statusId, userId])
+  @@index([userId])
+  @@map("status_reactions")
+}
+
+/// §24.13 story polls/questions — a "poll" sticker asks viewers to pick one of
+/// `options`; a "question" sticker collects free-text answers. Results are
+/// author-only in both cases (Requirement Scope §24.13).
+enum StatusPollKind {
+  poll
+  question
+}
+
+model StatusPoll {
+  id        String         @id @default(uuid())
+  statusId  String         @unique @map("status_id")
+  kind      StatusPollKind
+  question  String
+  /// Poll option labels (`[{ id, label }]`); null for a `question` sticker.
+  options   Json?
+  createdAt DateTime       @default(now()) @map("created_at")
+
+  status    Status               @relation(fields: [statusId], references: [id], onDelete: Cascade)
+  responses StatusPollResponse[]
+
+  @@map("status_polls")
+}
+
+/// One response per viewer per poll (upsert-by-PK on repeat votes).
+model StatusPollResponse {
+  pollId           String   @map("poll_id")
+  userId           String   @map("user_id")
+  /// Set for a `poll` kind — must match one of `StatusPoll.options`' ids.
+  selectedOptionId String?  @map("selected_option_id")
+  /// Set for a `question` kind — the viewer's free-text answer.
+  answerText       String?  @map("answer_text")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  poll StatusPoll @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([pollId, userId])
+  @@index([userId])
+  @@map("status_poll_responses")
 }
 
 /// Row exists only while a broadcast is active/just ended (Technical Spec §4).
@@ -409,25 +502,50 @@ model LiveSession {
 
 // ── Posts & feed ─────────────────────────────────────────────────────────────
 
+/// §24.7 post-handoff addendum: per-post visibility override, independent of
+/// (and never looser than) the author's account-level Visibility (§8).
+enum PostAudience {
+  everyone
+  friends
+  only_me
+}
+
 model Post {
-  id           String   @id @default(uuid())
-  authorId     String   @map("author_id")
-  mediaUrl     String   @map("media_url")
+  id           String       @id @default(uuid())
+  authorId     String       @map("author_id")
+  /// Nullable since §24.1 — a post may be caption-only with no media.
+  mediaUrl     String?      @map("media_url")
   caption      String?
+  audience     PostAudience @default(everyone)
   /// Denormalized counters kept in sync via transaction (Technical Spec §4).
-  likeCount    Int      @default(0) @map("like_count")
-  commentCount Int      @default(0) @map("comment_count")
-  viewCount    Int      @default(0) @map("view_count")
-  createdAt    DateTime @default(now()) @map("created_at")
+  likeCount    Int          @default(0) @map("like_count")
+  commentCount Int          @default(0) @map("comment_count")
+  viewCount    Int          @default(0) @map("view_count")
+  createdAt    DateTime     @default(now()) @map("created_at")
 
   author   User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
   hashtags PostHashtag[]
   comments Comment[]
   likes    Like[]
   saves    Save[]
+  tags     PostTag[]
 
   @@index([authorId, createdAt])
   @@map("posts")
+}
+
+/// §24.2 tag people in posts — distinct from the plain-text @mention linkifier (§13.8).
+model PostTag {
+  postId       String   @map("post_id")
+  taggedUserId String   @map("tagged_user_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  post       Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  taggedUser User @relation(fields: [taggedUserId], references: [id], onDelete: Cascade)
+
+  @@id([postId, taggedUserId])
+  @@index([taggedUserId])
+  @@map("post_tags")
 }
 
 model Hashtag {
@@ -454,13 +572,30 @@ model Comment {
   postId    String   @map("post_id")
   userId    String   @map("user_id")
   body      String
+  /// §24.6 comment likes — denormalized counter, same pattern as Post.likeCount.
+  likeCount Int      @default(0) @map("like_count")
   createdAt DateTime @default(now()) @map("created_at")
 
-  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  post  Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  likes CommentLike[]
 
   @@index([postId, createdAt])
   @@map("comments")
+}
+
+/// §24.6 comment likes.
+model CommentLike {
+  commentId String   @map("comment_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([commentId, userId])
+  @@index([userId])
+  @@map("comment_likes")
 }
 
 model Like {
@@ -566,8 +701,42 @@ model PushSubscription {
   userId    String   @map("user_id")
   p256dh    String
   auth      String
+  /// §24.9 — set when the subscribing client is running installed/standalone,
+  /// so notification copy/analytics can distinguish installed vs. tab usage.
+  installedPwa Boolean @default(false) @map("installed_pwa")
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([userId])
   @@map("push_subscriptions")
+}
+
+// ── Discovery (§24.3 trending movies & songs) ────────────────────────────────
+
+/// Cache table populated by a scheduled fetch — the app's API never calls
+/// TMDB on a user request (Technical Spec Part VI §22.3).
+model TrendingMovie {
+  id        String   @id
+  title     String
+  posterUrl String?  @map("poster_url")
+  overview  String?
+  rank      Int
+  fetchedAt DateTime @default(now()) @map("fetched_at")
+
+  @@index([rank])
+  @@map("trending_movies")
+}
+
+/// Cache table populated by a scheduled fetch against Deezer's public chart
+/// endpoint (no API key required).
+model TrendingSong {
+  id         String   @id
+  title      String
+  artist     String
+  coverUrl   String?  @map("cover_url")
+  previewUrl String?  @map("preview_url")
+  rank       Int
+  fetchedAt  DateTime @default(now()) @map("fetched_at")
+
+  @@index([rank])
+  @@map("trending_songs")
 }

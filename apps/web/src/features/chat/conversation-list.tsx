@@ -91,6 +91,8 @@ function previewText(
       return `📄 ${envelope.attachment.name}`;
     case 'post-share':
       return '📤 Shared post';
+    case 'story-reply':
+      return `↩️ ${envelope.text}`;
   }
 }
 

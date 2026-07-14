@@ -1,3 +1,4 @@
+import type { PostAudience } from '@prisma/client';
 import {
   LIMITS,
   computeRankingScore,
@@ -71,7 +72,9 @@ function toPostDtoFrom(post: PostWithHashtags, likedByMe: boolean, savedByMe: bo
     author: toUserSummaryDto(post.author),
     mediaUrl: post.mediaUrl,
     caption: post.caption,
+    audience: post.audience,
     hashtags: post.hashtags.map((h) => h.tag),
+    taggedUsers: post.tags.map((t) => toUserSummaryDto(t.taggedUser)),
     likeCount: post.likeCount,
     commentCount: post.commentCount,
     viewCount: post.viewCount,
@@ -91,8 +94,21 @@ function toCommentDto(comment: CommentWithUser): CommentDto {
     postId: comment.postId,
     user: toUserSummaryDto(comment.user),
     body: comment.body,
+    likeCount: comment.likeCount,
+    likedByMe: comment.likes.length > 0,
     createdAt: comment.createdAt.toISOString(),
   };
+}
+
+/**
+ * §24.7 — a post's audience defaults from the author's account-level
+ * visibility. `only_me` has no account-level equivalent — it's a purely
+ * per-post concept, never inferred. `private` and `friends` accounts are
+ * already treated identically everywhere else (`assertProfileVisible` only
+ * distinguishes public from not-public), so both default to `friends` here.
+ */
+function defaultAudienceFor(visibility: AuthorSummary['visibility']): PostAudience {
+  return visibility === 'public' ? 'everyone' : 'friends';
 }
 
 function extractHashtags(caption: string): string[] {
@@ -105,8 +121,8 @@ function extractHashtags(caption: string): string[] {
 
 // ── Visibility (mirrors social.service.ts's getPublicProfile gate) ──────────
 
-/** Invisible posts read as not-found, same as a blocked/private profile (§8, §13.3). */
-async function assertCanView(viewerId: string, author: AuthorSummary): Promise<void> {
+/** Account-level profile gate — unaffected by any individual post's audience. */
+async function assertProfileVisible(viewerId: string, author: AuthorSummary): Promise<void> {
   if (viewerId === author.id) return;
   const block = await social.findBlockBetween(viewerId, author.id);
   if (block) throw new AppError('NOT_FOUND', 'Post not found');
@@ -116,6 +132,30 @@ async function assertCanView(viewerId: string, author: AuthorSummary): Promise<v
   }
 }
 
+/**
+ * Invisible posts read as not-found, same as a blocked/private profile
+ * (§8, §13.3), further narrowed by the post's own audience (§24.7) — never
+ * looser than the account-level gate, only ever stricter.
+ */
+async function assertCanView(
+  viewerId: string,
+  post: { author: AuthorSummary; audience: PostAudience },
+): Promise<void> {
+  await assertProfileVisible(viewerId, post.author);
+  if (viewerId === post.author.id) return;
+  if (post.audience === 'only_me') throw new AppError('NOT_FOUND', 'Post not found');
+  if (post.audience === 'friends' && !(await social.findFriendship(viewerId, post.author.id))) {
+    throw new AppError('NOT_FOUND', 'Post not found');
+  }
+}
+
+/** §24.2 — silently drops any tagged id that isn't actually a friend (no tagging strangers). */
+async function filterToFriends(authorId: string, candidateIds: string[]): Promise<string[]> {
+  if (candidateIds.length === 0) return [];
+  const friendIds = new Set(await social.friendIds(authorId));
+  return [...new Set(candidateIds)].filter((id) => friendIds.has(id));
+}
+
 // ── Posts ────────────────────────────────────────────────────────────────────
 
 export async function createPost(authorId: string, body: CreatePostBody): Promise<PostDto> {
@@ -123,17 +163,39 @@ export async function createPost(authorId: string, body: CreatePostBody): Promis
   if (!author) throw new AppError('NOT_FOUND', 'User not found');
   // §13.1/§13.3: only public-profile authors get hashtag-indexed posts.
   const hashtags = author.visibility === 'public' ? extractHashtags(body.caption ?? '') : [];
+  const audience = body.audience ?? defaultAudienceFor(author.visibility);
+  const taggedUserIds = await filterToFriends(authorId, body.taggedUserIds ?? []);
   const created = await postRepo.create({
     authorId,
     mediaUrl: body.mediaUrl,
     caption: body.caption,
+    audience,
     hashtags,
+    taggedUserIds,
   });
   logger.info({ event: 'post.created', authorId, postId: created.id }, 'post created');
   const full = await postRepo.findById(created.id, authorId);
   invalidateFeedCache(hashtags);
   invalidateProfileCounts(authorId);
+  // §24.2 — tagged friends are notified in the same flow a liked/commented post uses.
+  const authorSummary = toUserSummaryDto(author);
+  await Promise.all(
+    taggedUserIds.map((taggedUserId) =>
+      notify(taggedUserId, 'tag', {
+        from: authorSummary,
+        postId: created.id,
+        postMediaUrl: created.mediaUrl,
+      }),
+    ),
+  );
   return toPostDto(full!);
+}
+
+/** §24.2 self-removal — a tagged user can remove their own tag; the author cannot remove it for them. */
+export async function removeMyTag(userId: string, postId: string): Promise<void> {
+  const removed = await postRepo.deleteTag(postId, userId);
+  if (!removed) throw new AppError('NOT_FOUND', 'You are not tagged in this post');
+  logger.info({ event: 'post.tag_removed', userId, postId }, 'tag removed by tagged user');
 }
 
 export async function deletePost(userId: string, postId: string): Promise<void> {
@@ -163,7 +225,7 @@ export async function adminDeletePost(postId: string): Promise<{ authorId: strin
 export async function getPost(viewerId: string, postId: string): Promise<PostDto> {
   const post = await postRepo.findById(postId, viewerId);
   if (!post) throw new AppError('NOT_FOUND', 'Post not found');
-  await assertCanView(viewerId, post.author);
+  await assertCanView(viewerId, post);
   if (viewerId !== post.authorId) {
     await postRepo.incrementView(postId);
     post.viewCount += 1;
@@ -178,10 +240,21 @@ export async function listUserPosts(
 ): Promise<Page<PostDto>> {
   const author = await users.findByUsername(username);
   if (!author || author.status !== 'active') throw new AppError('NOT_FOUND', 'User not found');
-  await assertCanView(viewerId, author);
+  await assertProfileVisible(viewerId, author);
+  // §24.8: the grid itself is gated per-post by audience — a non-friend
+  // visitor to a public profile only sees `everyone`-audience posts, even
+  // though the profile-level check above already let them in.
+  const isSelf = viewerId === author.id;
+  const isFriend = isSelf ? true : Boolean(await social.findFriendship(viewerId, author.id));
+  const audienceIn: PostAudience[] | undefined = isSelf
+    ? undefined
+    : isFriend
+      ? ['everyone', 'friends']
+      : ['everyone'];
   const rows = await postRepo.listByAuthor(author.id, viewerId, {
     cursor: pagination.cursor,
     limit: pagination.limit + 1,
+    audienceIn,
   });
   const pageRows = rows.slice(0, pagination.limit);
   return {
@@ -195,13 +268,19 @@ export async function listUserPosts(
 export async function toggleLike(userId: string, postId: string): Promise<{ liked: boolean }> {
   const post = await postRepo.findById(postId, userId);
   if (!post) throw new AppError('NOT_FOUND', 'Post not found');
-  await assertCanView(userId, post.author);
+  await assertCanView(userId, post);
   const liked = await postRepo.toggleLike(postId, userId);
   // A changed like count shifts the ranking score (§13.2) — drop the cached window.
   invalidateFeedCache(post.hashtags.map((h) => h.tag));
   if (liked && post.authorId !== userId) {
     const liker = await users.findById(userId);
-    if (liker) await notify(post.authorId, 'post_like', { from: toUserSummaryDto(liker), postId });
+    if (liker) {
+      await notify(post.authorId, 'post_like', {
+        from: toUserSummaryDto(liker),
+        postId,
+        postMediaUrl: post.mediaUrl,
+      });
+    }
   }
   return { liked };
 }
@@ -210,7 +289,7 @@ export async function toggleLike(userId: string, postId: string): Promise<{ like
 export async function toggleSave(userId: string, postId: string): Promise<{ saved: boolean }> {
   const post = await postRepo.findById(postId, userId);
   if (!post) throw new AppError('NOT_FOUND', 'Post not found');
-  await assertCanView(userId, post.author);
+  await assertCanView(userId, post);
   return { saved: await postRepo.toggleSave(postId, userId) };
 }
 
@@ -221,7 +300,7 @@ export async function createComment(
 ): Promise<CommentDto> {
   const post = await postRepo.findById(postId, userId);
   if (!post) throw new AppError('NOT_FOUND', 'Post not found');
-  await assertCanView(userId, post.author);
+  await assertCanView(userId, post);
   const commenter = await users.findById(userId);
   if (!commenter) throw new AppError('NOT_FOUND', 'User not found');
   const comment = await postRepo.createComment(postId, userId, body);
@@ -232,10 +311,11 @@ export async function createComment(
       from: toUserSummaryDto(commenter),
       postId,
       commentId: comment.id,
+      postMediaUrl: post.mediaUrl,
     });
   }
   logger.info({ event: 'post.commented', userId, postId, commentId: comment.id }, 'comment added');
-  return toCommentDto({ ...comment, user: commenter });
+  return toCommentDto({ ...comment, user: commenter, likes: [] });
 }
 
 export async function listComments(
@@ -245,8 +325,8 @@ export async function listComments(
 ): Promise<Page<CommentDto>> {
   const post = await postRepo.findById(postId, viewerId);
   if (!post) throw new AppError('NOT_FOUND', 'Post not found');
-  await assertCanView(viewerId, post.author);
-  const rows = await postRepo.listComments(postId, {
+  await assertCanView(viewerId, post);
+  const rows = await postRepo.listComments(postId, viewerId, {
     cursor: pagination.cursor,
     limit: pagination.limit + 1,
   });
@@ -255,6 +335,29 @@ export async function listComments(
     items: pageRows.map(toCommentDto),
     ...(rows.length > pagination.limit ? { nextCursor: pageRows.at(-1)!.id } : {}),
   };
+}
+
+/** §24.6 comment likes — toggle + transactional counter, mirrors post likes. */
+export async function toggleCommentLike(
+  userId: string,
+  commentId: string,
+): Promise<{ liked: boolean }> {
+  const comment = await postRepo.findCommentWithPost(commentId);
+  if (!comment) throw new AppError('NOT_FOUND', 'Comment not found');
+  await assertCanView(userId, comment.post);
+  const liked = await postRepo.toggleCommentLike(commentId, userId);
+  if (liked && comment.userId !== userId) {
+    const liker = await users.findById(userId);
+    if (liker) {
+      await notify(comment.userId, 'comment_like', {
+        from: toUserSummaryDto(liker),
+        postId: comment.postId,
+        commentId,
+        postMediaUrl: comment.post.mediaUrl,
+      });
+    }
+  }
+  return { liked };
 }
 
 /** "Posts I've Liked" (§13.5) — the viewer's own history, not re-checked for current visibility. */

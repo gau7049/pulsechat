@@ -28,15 +28,26 @@ export function unreadCountFrom(pages: Page<NotificationDto>[] | undefined): num
   return pages?.flatMap((page) => page.items).filter((n) => !n.readAt).length ?? 0;
 }
 
+/**
+ * Moves a notification to the top of the cached list, replacing any copy
+ * already present elsewhere in it — the server may re-emit the same id for
+ * a deduped repeat event (e.g. like → unlike → like), and blindly prepending
+ * would otherwise leave two rows for the same notification in the cache.
+ */
 function prepend(queryClient: QueryClient, notification: NotificationDto): void {
   queryClient.setQueriesData<{ pages: Page<NotificationDto>[]; pageParams: unknown[] }>(
     { queryKey: notificationsKey },
     (data) => {
       if (!data) return data;
       const [first, ...rest] = data.pages;
+      const withoutExisting = (first?.items ?? []).filter((n) => n.id !== notification.id);
+      const remainingPages = rest.map((page) => ({
+        ...page,
+        items: page.items.filter((n) => n.id !== notification.id),
+      }));
       return {
         ...data,
-        pages: [{ ...first, items: [notification, ...(first?.items ?? [])] }, ...rest],
+        pages: [{ ...first, items: [notification, ...withoutExisting] }, ...remainingPages],
       };
     },
   );
@@ -65,12 +76,22 @@ export function useMarkAllRead() {
   });
 }
 
+/** §24.9 — distinguishes an installed/standalone launch from an open browser tab. */
+function isInstalledStandalone(): boolean {
+  return (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    // iOS Safari's legacy (non-standard) flag — no `display-mode` media query support there.
+    (navigator as Navigator & { standalone?: boolean }).standalone === true
+  );
+}
+
 export function usePushSubscription() {
   const subscribe = useMutation({
     mutationFn: (sub: PushSubscriptionJSON) =>
       post<{ ok: true }>('/push/subscribe', {
         endpoint: sub.endpoint,
         keys: sub.keys,
+        installedPwa: isInstalledStandalone(),
       }),
   });
   const unsubscribe = useMutation({

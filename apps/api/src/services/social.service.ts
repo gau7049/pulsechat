@@ -1,6 +1,7 @@
 import {
   LIMITS,
   type BlockedUserDto,
+  type CloseFriendDto,
   type FriendDto,
   type FriendRequestDto,
   type Page,
@@ -12,6 +13,7 @@ import {
 } from '@pulsechat/shared';
 import { cache } from '../lib/cache.js';
 import { logger } from '../lib/logger.js';
+import { prisma } from '../lib/prisma.js';
 import * as social from '../repositories/social.repository.js';
 import * as users from '../repositories/user.repository.js';
 import type { UserWithPrivacy } from '../repositories/user.repository.js';
@@ -370,6 +372,40 @@ export async function suggestions(userId: string): Promise<SuggestionDto[]> {
     }));
 }
 
+/**
+ * §24.5 new-user-suggestion notifications: the only concrete graph signal
+ * available at signup time is the inviter (§10.3) — a brand-new account has
+ * no friends of its own yet to run the usual friends-of-friends heuristic
+ * against, so this notifies the *inviter's* other friends, who are the
+ * people most likely to actually know the new signup. Best-effort, never
+ * throws — mirrors `linkInviteOnRegister`'s own error handling.
+ */
+export async function notifySuggestedConnections(
+  inviterId: string,
+  newUser: { id: string; username: string; displayName: string; avatarUrl: string | null },
+): Promise<void> {
+  try {
+    const inviterFriendIds = (await social.friendIds(inviterId)).filter((id) => id !== newUser.id);
+    await Promise.all(
+      inviterFriendIds.map((friendId) =>
+        notify(friendId, 'new_user_suggestion', {
+          from: {
+            id: newUser.id,
+            username: newUser.username,
+            displayName: newUser.displayName,
+            avatarUrl: newUser.avatarUrl,
+          },
+        }),
+      ),
+    );
+  } catch (error) {
+    logger.error(
+      { event: 'social.new_user_suggestion_failed', inviterId, newUserId: newUser.id, err: error },
+      'new-user suggestion notify failed',
+    );
+  }
+}
+
 // ── Blocks (§10.2) ───────────────────────────────────────────────────────────
 
 export async function blockUser(blockerId: string, targetId: string): Promise<void> {
@@ -398,6 +434,105 @@ export async function listBlocked(userId: string): Promise<BlockedUserDto[]> {
     user: toUserSummaryDto(row.blocked),
     blockedAt: row.createdAt.toISOString(),
   }));
+}
+
+// ── Close friends (§24.12) ───────────────────────────────────────────────────
+
+export async function listCloseFriends(ownerId: string): Promise<CloseFriendDto[]> {
+  const rows = await social.listCloseFriends(ownerId);
+  return rows.map((row) => ({
+    user: toUserSummaryDto(row.friend),
+    addedAt: row.createdAt.toISOString(),
+  }));
+}
+
+/** Only actual friends can be added — an entry for a non-friend is meaningless. */
+export async function addCloseFriend(ownerId: string, friendId: string): Promise<void> {
+  if (ownerId === friendId) {
+    throw new AppError('VALIDATION_FAILED', 'You cannot add yourself as a close friend');
+  }
+  const friendship = await social.findFriendship(ownerId, friendId);
+  if (!friendship) throw new AppError('NOT_FOUND', 'You are not friends with this user');
+  await social.addCloseFriend(ownerId, friendId);
+  logger.info({ event: 'social.close_friend_added', ownerId, friendId }, 'close friend added');
+}
+
+export async function removeCloseFriend(ownerId: string, friendId: string): Promise<void> {
+  const removed = await social.removeCloseFriend(ownerId, friendId);
+  if (!removed) throw new AppError('NOT_FOUND', 'This user is not on your close friends list');
+  logger.info({ event: 'social.close_friend_removed', ownerId, friendId }, 'close friend removed');
+}
+
+// ── Friendship anniversary nudges (§24.14) ───────────────────────────────────
+
+let anniversarySweepHandle: NodeJS.Timeout | null = null;
+
+/** Has `userId` already been nudged about `otherUserId` in roughly the last day? */
+async function alreadyNotifiedAnniversary(userId: string, otherUserId: string): Promise<boolean> {
+  const recent = await prisma.notification.findMany({
+    where: {
+      userId,
+      type: 'friendship_anniversary',
+      createdAt: { gte: new Date(Date.now() - 20 * 60 * 60 * 1000) },
+    },
+    take: 5,
+  });
+  return recent.some(
+    (row) => (row.payloadJson as { from?: { id?: string } } | null)?.from?.id === otherUserId,
+  );
+}
+
+async function nudgeAnniversary(userId: string, other: UserWithPrivacy): Promise<void> {
+  if (await alreadyNotifiedAnniversary(userId, other.id)) return;
+  await notify(userId, 'friendship_anniversary', { from: toUserSummaryDto(other) });
+}
+
+/**
+ * Every friendship whose `createdAt` falls a whole number of years before
+ * today (month + day match) gets both members nudged. Friendships are
+ * "small at product scale" (§10's existing trade-off for `friendIds`), so
+ * this scans them all in JS rather than a DB-side date-part expression.
+ */
+async function runAnniversarySweep(): Promise<void> {
+  const today = new Date();
+  const friendships = await social.allFriendships();
+  const due = friendships.filter((f) => {
+    const years = today.getUTCFullYear() - f.createdAt.getUTCFullYear();
+    return (
+      years >= 1 &&
+      f.createdAt.getUTCMonth() === today.getUTCMonth() &&
+      f.createdAt.getUTCDate() === today.getUTCDate()
+    );
+  });
+  if (due.length === 0) return;
+
+  const userIds = [...new Set(due.flatMap((f) => [f.userAId, f.userBId]))];
+  const people = await users.findManyByIds(userIds);
+  const byId = new Map(people.map((person) => [person.id, person]));
+
+  for (const friendship of due) {
+    const userA = byId.get(friendship.userAId);
+    const userB = byId.get(friendship.userBId);
+    if (!userA || !userB) continue;
+    await nudgeAnniversary(userA.id, userB);
+    await nudgeAnniversary(userB.id, userA);
+  }
+}
+
+/** Roughly-daily sweep, started once at boot (same idiom as the status/trending sweeps). */
+export function startAnniversarySweep(): void {
+  if (anniversarySweepHandle) return;
+  const run = () => {
+    runAnniversarySweep().catch((error: unknown) => {
+      logger.error(
+        { event: 'social.anniversary_sweep_failed', err: error },
+        'anniversary sweep failed',
+      );
+    });
+  };
+  anniversarySweepHandle = setInterval(run, LIMITS.ANNIVERSARY_SWEEP_INTERVAL_MS);
+  anniversarySweepHandle.unref();
+  run();
 }
 
 // ── Public profile (§7–8) ────────────────────────────────────────────────────

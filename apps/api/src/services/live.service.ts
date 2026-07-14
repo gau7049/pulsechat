@@ -5,6 +5,7 @@ import { logger } from '../lib/logger.js';
 import * as liveRepo from '../repositories/live.repository.js';
 import * as social from '../repositories/social.repository.js';
 import * as users from '../repositories/user.repository.js';
+import { clearLiveState } from '../sockets/rtc.handlers.js';
 import { toLiveSessionDto } from './status.service.js';
 import { toUserSummaryDto } from './user-summary.serializer.js';
 
@@ -49,6 +50,7 @@ export async function endLiveIfActive(userId: string): Promise<void> {
 
 async function fanOutEnded(userId: string): Promise<void> {
   logger.info({ event: 'live.ended', userId }, 'live ended');
+  clearLiveState(userId);
   const io = getIo();
   if (!io) return;
   const payload = { userId };

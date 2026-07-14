@@ -8,11 +8,13 @@ import {
   otpVerifySchema,
   registerBodySchema,
   resetPasswordSchema,
+  stepUpSchema,
   type AuthResultDto,
   type DeviceDto,
   type LoginBody,
   type OtpChallengeDto,
   type RegisterBody,
+  type StepUpBody,
 } from '@pulsechat/shared';
 import { env } from '../../config/env.js';
 import * as auth from '../../services/auth.service.js';
@@ -27,6 +29,7 @@ import * as usersRepo from '../../repositories/user.repository.js';
 import { AppError } from '../errors.js';
 import { authLimiter, emailLimiter } from '../middleware/rate-limit.js';
 import { requireAuth } from '../middleware/require-auth.js';
+import { requireStepUp } from '../middleware/require-step-up.js';
 import { validateBody } from '../middleware/validate.js';
 
 export const authRouter: Router = Router();
@@ -38,18 +41,23 @@ function requestContext(req: Request): auth.RequestContext {
   return { ip: req.ip ?? 'unknown', userAgent: req.headers['user-agent'] ?? 'unknown' };
 }
 
-function setRefreshCookie(res: Response, token: string): void {
+/**
+ * §6.2 remember me: a 30-day cookie when the caller opted in, otherwise a
+ * true browser-session cookie (no `maxAge` — dropped on browser close). The
+ * server-side token has its own, independently-checked expiry either way.
+ */
+function setRefreshCookie(res: Response, token: string, rememberMe: boolean): void {
   res.cookie(REFRESH_COOKIE, token, {
     httpOnly: true,
     secure: env.NODE_ENV === 'production',
     sameSite: 'strict',
     path: '/auth',
-    maxAge: REFRESH_COOKIE_MAX_AGE_MS,
+    ...(rememberMe ? { maxAge: REFRESH_COOKIE_MAX_AGE_MS } : {}),
   });
 }
 
 function sessionResponse(res: Response, session: auth.IssuedSession, status = 200): void {
-  setRefreshCookie(res, session.refreshToken);
+  setRefreshCookie(res, session.refreshToken, session.rememberMe);
   const body: AuthResultDto = { user: toMeDto(session.user), accessToken: session.accessToken };
   res.status(status).json(body);
 }
@@ -80,6 +88,7 @@ authRouter.post('/auth/login', authLimiter, validateBody(loginBodySchema), async
       body.password,
       body.deviceFingerprint,
       requestContext(req),
+      body.rememberMe,
     );
     backoff.clearLoginFailures(body.username, ip);
 
@@ -113,6 +122,7 @@ authRouter.post(
       pending.deviceFingerprint,
       code,
       requestContext(req),
+      pending.rememberMe,
     );
     sessionResponse(res, session);
   },
@@ -255,7 +265,7 @@ authRouter.post('/auth/otp/enable', requireAuth, authLimiter, async (req, res) =
   res.json({ user: toMeDto(updated) });
 });
 
-authRouter.post('/auth/otp/disable', requireAuth, authLimiter, async (req, res) => {
+authRouter.post('/auth/otp/disable', requireAuth, requireStepUp, authLimiter, async (req, res) => {
   const updated = await usersRepo.updateUser(req.auth!.sub, { otpEnabled: false });
   await recordAudit(req.auth!.sub, 'otp_disabled', {
     ip: req.ip,
@@ -263,6 +273,19 @@ authRouter.post('/auth/otp/disable', requireAuth, authLimiter, async (req, res) 
   });
   res.json({ user: toMeDto(updated) });
 });
+
+// ── Step-up re-auth (§6.2) ───────────────────────────────────────────────────
+
+authRouter.post(
+  '/auth/step-up',
+  requireAuth,
+  authLimiter,
+  validateBody(stepUpSchema),
+  async (req, res) => {
+    const { password } = req.body as StepUpBody;
+    res.json(await auth.stepUp(req.auth!.sub, req.auth!.deviceId, password));
+  },
+);
 
 // ── Device / session management (§6.5) ───────────────────────────────────────
 
@@ -279,7 +302,7 @@ authRouter.get('/auth/devices', requireAuth, async (req, res) => {
   res.json({ items });
 });
 
-authRouter.delete('/auth/devices/:id', requireAuth, async (req, res) => {
+authRouter.delete('/auth/devices/:id', requireAuth, requireStepUp, async (req, res) => {
   const list = await devices.listActiveForUser(req.auth!.sub);
   const target = list.find((device) => device.id === req.params.id);
   if (!target) throw new AppError('NOT_FOUND', 'Session not found');

@@ -26,6 +26,13 @@ export type CallActionPayload = z.infer<typeof callActionSchema>;
 export const liveTargetSchema = z.object({ broadcasterUserId: z.string().uuid() });
 export type LiveTargetPayload = z.infer<typeof liveTargetSchema>;
 
+/** live:comment (§24.15) — friend-gated the same way live:join already is. */
+export const liveCommentSchema = z.object({
+  broadcasterUserId: z.string().uuid(),
+  text: z.string().trim().min(1).max(300),
+});
+export type LiveCommentInput = z.infer<typeof liveCommentSchema>;
+
 /**
  * call:offer / call:answer / call:ice-candidate — one relay handler covers
  * both a 1:1 call and a live mesh leg, discriminated by `context`.
@@ -86,6 +93,24 @@ export interface LiveViewerJoinedPayload {
 export interface LiveViewerLeftPayload {
   broadcasterUserId: string;
   viewerId: string;
+}
+
+/** §24.15 — sent once to a viewer right after they join, so late joiners
+ *  see who's already watching instead of only future join events. */
+export interface LiveViewersSnapshotPayload {
+  broadcasterUserId: string;
+  viewers: UserSummaryDto[];
+}
+
+/** §24.15 — ephemeral live comment, fanned out to the live room; not persisted. */
+export interface LiveCommentPayload {
+  broadcasterUserId: string;
+  comment: {
+    id: string;
+    user: UserSummaryDto;
+    text: string;
+    createdAt: string;
+  };
 }
 
 /** What the server actually forwards for an offer/answer/ice-candidate relay. */

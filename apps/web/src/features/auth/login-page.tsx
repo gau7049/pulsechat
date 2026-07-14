@@ -20,6 +20,7 @@ export function LoginPage() {
   const [stage, setStage] = useState<Stage>({ name: 'credentials' });
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [magicEmail, setMagicEmail] = useState('');
   const [showMagic, setShowMagic] = useState(false);
   const [otpCode, setOtpCode] = useState('');
@@ -36,7 +37,12 @@ export function LoginPage() {
     }
     setSubmitting(true);
     try {
-      const result = await login(username.trim(), password, turnstileToken ?? undefined);
+      const result = await login(
+        username.trim(),
+        password,
+        turnstileToken ?? undefined,
+        rememberMe,
+      );
       if (result.kind === 'session') {
         navigate('/', { replace: true });
       } else if (result.kind === 'otp_required') {
@@ -205,6 +211,15 @@ export function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
             required
           />
+          <label className="flex items-center gap-2 text-sm text-fg-muted">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              className="size-4 accent-(--accent)"
+            />
+            Remember me for 30 days
+          </label>
           <div className="flex items-center justify-between text-sm">
             <button
               type="button"

@@ -6,7 +6,8 @@ export const visibilityEnum = z.enum(['public', 'friends', 'private']);
 export type Visibility = z.infer<typeof visibilityEnum>;
 
 export const lastSeenVisibilityEnum = z.enum(['everyone', 'friends', 'no_one']);
-export const statusVisibilityEnum = z.enum(['everyone', 'friends']);
+/** §24.12 close_friends restricts a status/live session to the CloseFriend list. */
+export const statusVisibilityEnum = z.enum(['everyone', 'friends', 'close_friends']);
 export type StatusVisibility = z.infer<typeof statusVisibilityEnum>;
 
 /** PATCH /users/me (Requirement Scope §7 optional fields). */

@@ -1,17 +1,23 @@
+import { randomUUID } from 'node:crypto';
 import type { Socket } from 'socket.io';
 import type { ZodTypeAny, z } from 'zod';
 import {
   CLIENT_EVENTS,
+  LIMITS,
   SERVER_EVENTS,
   callActionSchema,
   callInviteSchema,
+  liveCommentSchema,
   liveTargetSchema,
   rtcSignalSchema,
   type CallIncomingPayload,
   type CallLifecyclePayload,
+  type LiveCommentPayload,
   type LiveViewerJoinedPayload,
   type LiveViewerLeftPayload,
+  type LiveViewersSnapshotPayload,
   type RtcSignalRelayPayload,
+  type UserSummaryDto,
 } from '@pulsechat/shared';
 import { getIo } from '../lib/io.js';
 import { logger } from '../lib/logger.js';
@@ -34,6 +40,23 @@ interface CallPairing {
 
 /** callId -> the two parties. Module-level, same style as presence.service's socket map. */
 const activeCalls = new Map<string, CallPairing>();
+
+/**
+ * §24.15 live viewer list + comments: broadcasterId -> current viewers, so a
+ * joining viewer can be told who's already watching instead of only ever
+ * learning about *future* joins. Ephemeral, module-level — same shape as
+ * `activeCalls`; not persisted (no DB entity, matching the live mesh's own
+ * event-only design).
+ */
+const liveViewers = new Map<string, Map<string, UserSummaryDto>>();
+/** broadcasterId -> a bounded recent-comment ring buffer for late joiners. */
+const liveCommentHistory = new Map<string, LiveCommentPayload['comment'][]>();
+
+/** Cleans up all in-memory state for a broadcast once it ends. */
+export function clearLiveState(broadcasterId: string): void {
+  liveViewers.delete(broadcasterId);
+  liveCommentHistory.delete(broadcasterId);
+}
 
 function parse<TSchema extends ZodTypeAny>(
   schema: TSchema,
@@ -125,11 +148,29 @@ export function registerRtcHandlers(socket: Socket): void {
       await socket.join(`live:${parsed.broadcasterUserId}`);
       const viewer = await users.findById(userId);
       if (!viewer) return;
+      const summary = toUserSummaryDto(viewer);
+
+      const viewers = liveViewers.get(parsed.broadcasterUserId) ?? new Map();
+      viewers.set(userId, summary);
+      liveViewers.set(parsed.broadcasterUserId, viewers);
+
       const event: LiveViewerJoinedPayload = {
         broadcasterUserId: parsed.broadcasterUserId,
-        viewer: toUserSummaryDto(viewer),
+        viewer: summary,
       };
       getIo()?.to(`user:${parsed.broadcasterUserId}`).emit(SERVER_EVENTS.LIVE_VIEWER_JOINED, event);
+
+      // §24.15 — tell the joining viewer who's already watching, and hand
+      // them recent comment context rather than only future ones.
+      const snapshot: LiveViewersSnapshotPayload = {
+        broadcasterUserId: parsed.broadcasterUserId,
+        viewers: [...viewers.values()],
+      };
+      socket.emit(SERVER_EVENTS.LIVE_VIEWERS_SNAPSHOT, snapshot);
+      for (const comment of liveCommentHistory.get(parsed.broadcasterUserId) ?? []) {
+        const replay: LiveCommentPayload = { broadcasterUserId: parsed.broadcasterUserId, comment };
+        socket.emit(SERVER_EVENTS.LIVE_COMMENT, replay);
+      }
     })();
   });
 
@@ -138,11 +179,38 @@ export function registerRtcHandlers(socket: Socket): void {
       const parsed = parse(liveTargetSchema, payload);
       if (!parsed) return;
       await socket.leave(`live:${parsed.broadcasterUserId}`);
+      liveViewers.get(parsed.broadcasterUserId)?.delete(userId);
       const event: LiveViewerLeftPayload = {
         broadcasterUserId: parsed.broadcasterUserId,
         viewerId: userId,
       };
       getIo()?.to(`user:${parsed.broadcasterUserId}`).emit(SERVER_EVENTS.LIVE_VIEWER_LEFT, event);
+    })();
+  });
+
+  // §24.15 — friend-gated the same way live:join already is; ephemeral, not persisted.
+  socket.on(CLIENT_EVENTS.LIVE_COMMENT, (payload: unknown) => {
+    void (async () => {
+      const parsed = parse(liveCommentSchema, payload);
+      if (!parsed) return;
+      const allowed = await canViewLive(userId, parsed.broadcasterUserId);
+      if (!allowed) return;
+      const author = await users.findById(userId);
+      if (!author) return;
+
+      const comment = {
+        id: randomUUID(),
+        user: toUserSummaryDto(author),
+        text: parsed.text,
+        createdAt: new Date().toISOString(),
+      };
+      const history = liveCommentHistory.get(parsed.broadcasterUserId) ?? [];
+      history.push(comment);
+      if (history.length > LIMITS.LIVE_COMMENT_HISTORY_SIZE) history.shift();
+      liveCommentHistory.set(parsed.broadcasterUserId, history);
+
+      const event: LiveCommentPayload = { broadcasterUserId: parsed.broadcasterUserId, comment };
+      getIo()?.to(`live:${parsed.broadcasterUserId}`).emit(SERVER_EVENTS.LIVE_COMMENT, event);
     })();
   });
 
@@ -175,6 +243,12 @@ export function registerRtcHandlers(socket: Socket): void {
       if (pairing.callerUserId === userId || pairing.calleeUserId === userId) {
         endCall(callId, userId);
       }
+    }
+    // §24.15 — drop this viewer from every broadcast's viewer list.
+    for (const [broadcasterUserId, viewers] of liveViewers) {
+      if (!viewers.delete(userId)) continue;
+      const event: LiveViewerLeftPayload = { broadcasterUserId, viewerId: userId };
+      getIo()?.to(`user:${broadcasterUserId}`).emit(SERVER_EVENTS.LIVE_VIEWER_LEFT, event);
     }
   });
 }

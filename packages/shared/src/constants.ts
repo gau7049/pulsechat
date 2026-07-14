@@ -31,6 +31,22 @@ export const LIMITS = {
   TURN_CREDENTIAL_TTL_SECONDS: 60 * 60,
   /** Recent-post window ranked in-memory for hashtag pages / explore (§13.2). */
   FEED_RANKING_WINDOW: 300,
+  /** §24.3 — how often the API re-fetches TMDB/Deezer trending content. */
+  TRENDING_REFRESH_INTERVAL_MS: 6 * 60 * 60 * 1000,
+  /** §24.3 — trending rows kept per source, both well under either API's free-tier page size. */
+  TRENDING_ITEMS_PER_SOURCE: 20,
+  /** §6.2 remember-me: refresh-cookie/token lifetime when rememberMe is true. */
+  REMEMBER_ME_REFRESH_DAYS: 30,
+  /** §6.2 remember-me: server-side cap when rememberMe is false — the cookie
+   *  itself is already browser-session-only; this is defense in depth. */
+  SESSION_ONLY_REFRESH_HOURS: 24,
+  /** §6.2 step-up re-auth: how long a password re-confirmation stays valid. */
+  STEP_UP_TTL_MINUTES: 10,
+  /** §24.15 — comments kept in memory per active live broadcast for late joiners. */
+  LIVE_COMMENT_HISTORY_SIZE: 30,
+  LIVE_COMMENT_MAX_CHARS: 300,
+  /** §24.14 — how often the API checks for friendship anniversaries. */
+  ANNIVERSARY_SWEEP_INTERVAL_MS: 24 * 60 * 60 * 1000,
 } as const;
 
 /**
