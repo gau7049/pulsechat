@@ -5,8 +5,8 @@ import { env } from '../config/env.js';
 /**
  * ICE server list for WebRTC calls/live (Technical Spec §11). Google's public
  * STUN is always included and free. TURN is self-hosted coturn on the Oracle
- * Always-Free VM (still pending manual provisioning — see ROADMAP.md "Pending
- * manual setup") using the turnserver REST-API shared-secret credential
+ * Always-Free VM (still pending manual provisioning — see `infra/coturn/README.md`)
+ * using the turnserver REST-API shared-secret credential
  * scheme: no static creds ever ship to the client, and when TURN_HOST/
  * TURN_SHARED_SECRET are unset the client simply gets STUN-only, which is
  * this milestone's explicit "works same-network, degrades gracefully" bar.

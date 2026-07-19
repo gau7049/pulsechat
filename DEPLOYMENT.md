@@ -1,32 +1,39 @@
 # Deployment Guide
 
-How to ship PulseChat to production on the free-tier stack this project was built for
-(`Claude Code Build Instructions.md` §2). See `PENDING_SETUP.md` first — several steps here
-need values from that file (TURN, VAPID, Brevo, etc.) that may still be placeholders.
+How to ship PulseChat to production on the free-tier stack this project was built for.
+Some steps below (TURN, VAPID, Brevo) need provider keys that may still be placeholders —
+see `.env.example` for the full list of variables and `apps/api/src/config/env.ts` for which
+ones no-op safely when unset.
 
 ## Architecture
 
-| Layer                | Platform                          | Why                                                              |
-| --------------------- | ---------------------------------- | ------------------------------------------------------------------ |
-| Web app (`apps/web`)  | **Vercel**                          | Static Vite build, free tier, git-integrated                    |
-| API + Socket.IO (`apps/api`) | **Render** (Web Service, not serverless) | Long-lived process required for websocket connections |
-| Database              | **Supabase** (Postgres)            | Already provisioned — see `PENDING_SETUP.md` for status         |
-| DB backups             | GitHub Actions nightly cron → **Backblaze B2** | Free tier, already scripted in `.github/workflows/backup.yml` |
-| TURN relay (calls/live) | Self-hosted **coturn** on an Oracle Cloud Always-Free VM | Only real always-on infra piece; STUN-only works without it |
-| Uptime monitoring       | **UptimeRobot**                    | Free tier, pings `/healthz`                                     |
-| CI/CD                   | **GitHub Actions**                 | Already wired — see below                                       |
+| Layer                        | Platform                                                 | Why                                                           |
+| ---------------------------- | -------------------------------------------------------- | ------------------------------------------------------------- |
+| Web app (`apps/web`)         | **Vercel**                                               | Static Vite build, free tier, git-integrated                  |
+| API + Socket.IO (`apps/api`) | **Render** (Web Service, not serverless)                 | Long-lived process required for websocket connections         |
+| Database                     | **Supabase** (Postgres)                                  | Free tier, provisioned via the Supabase dashboard             |
+| DB backups                   | GitHub Actions nightly cron → **Backblaze B2**           | Free tier, already scripted in `.github/workflows/backup.yml` |
+| TURN relay (calls/live)      | Self-hosted **coturn** on an Oracle Cloud Always-Free VM | Only real always-on infra piece; STUN-only works without it   |
+| Uptime monitoring            | **UptimeRobot**                                          | Free tier, pings `/healthz`                                   |
+| CI/CD                        | **GitHub Actions**                                       | Already wired — see below                                     |
 
 There is no `Dockerfile` or `render.yaml` in the repo — Render is configured through its
 dashboard, using the existing `package.json` scripts directly. The API's `"build"` script
-(`tsc --noEmit`) is typecheck-only, not a compile step — production runs the TypeScript
-source directly via `tsx` (`"start": "tsx src/index.ts"`). This is intentional for this
-project's scale, not a placeholder.
+typechecks (`tsc --noEmit`) and then bundles the server — plus the TS-only
+`@pulsechat/shared` package — into a single `dist/index.js` with esbuild (`build.mjs`);
+`"start"` runs that compiled file on plain `node`. This matters on Render's free tier: the
+previous `tsx src/index.ts` start transpiled the whole source graph at boot and kept esbuild
+resident, and that cold-start spike overran the **512 MB** memory limit. The compiled server
+idles around ~80 MB instead. `dev` still uses `tsx watch` for fast local iteration; only
+production is compiled. The `--max-old-space-size=384` flag in `start` is a safety cap that
+makes V8 collect garbage well before the container limit rather than letting it grow into an
+OOM kill.
 
 `apps/web/vercel.json` (added in M12) sets security response headers (CSP, HSTS,
 X-Frame-Options, etc.) for the deployed SPA — **before your first deploy**, replace the two
 `REPLACE-WITH-YOUR-API-DOMAIN.onrender.com` placeholders in its `connect-src` directive with
 your actual Render API domain from Step 1, or the app's `fetch`/Socket.IO calls will be
-blocked by the browser. If you later configure TURN (`PENDING_SETUP.md`), verify calls still
+blocked by the browser. If you later configure TURN, verify calls still
 connect in a real browser afterward — WebRTC's interaction with `connect-src` varies enough
 across browsers that it's worth a manual check rather than assuming.
 
@@ -39,7 +46,7 @@ Create these if you haven't already (all free tier):
 3. **Backblaze B2** — backblaze.com/b2, create a bucket (e.g. `pulsechat-backups`) and an
    application key scoped to it. Note the Key ID, Application Key, and bucket name.
 4. **UptimeRobot** — uptimerobot.com, free tier.
-5. Supabase is already set up (see `PENDING_SETUP.md`).
+5. **Supabase** — supabase.com, create a project and copy its Postgres connection string.
 
 ## Step 1 — Deploy the API to Render
 
@@ -48,16 +55,21 @@ Create these if you haven't already (all free tier):
    `pnpm-workspace.yaml` to install correctly).
 3. **Build Command:**
    ```
-   pnpm install --frozen-lockfile && pnpm db:generate && pnpm db:deploy
+   pnpm install --frozen-lockfile && pnpm db:generate && pnpm --filter @pulsechat/api build && pnpm db:deploy
    ```
    `db:generate` runs `prisma generate` (needed before the app can import `@prisma/client`
-   types); `db:deploy` runs `prisma migrate deploy` — the same non-interactive migration
-   command CI already uses (`.github/workflows/ci.yml`), safe to run on every deploy since it
-   only applies migrations that haven't run yet.
+   types); `pnpm --filter @pulsechat/api build` typechecks and bundles the server to
+   `dist/index.js` (what `start` runs); `db:deploy` runs `prisma migrate deploy` — the same
+   non-interactive migration command CI already uses (`.github/workflows/ci.yml`), safe to run
+   on every deploy since it only applies migrations that haven't run yet. (Only the API is
+   built here — the web app deploys separately to Vercel, so there's no need to build it on
+   Render.)
 4. **Start Command:**
    ```
    pnpm --filter @pulsechat/api start
    ```
+   (runs `node --max-old-space-size=384 dist/index.js` — the file produced by the build step
+   above, so make sure the build ran successfully first).
 5. **Environment variables** (Render dashboard → Environment): set every var from
    `.env.example`, with these production-specific values:
    - `NODE_ENV=production`
@@ -75,7 +87,7 @@ Create these if you haven't already (all free tier):
    - Everything else (`BREVO_API_KEY`, `TURNSTILE_SECRET`, `CLOUDINARY_URL`,
      `TURN_SHARED_SECRET`, `TURN_HOST`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
      `TMDB_API_KEY`) — copy whatever's real in your `.env`; leave placeholder ones unset, the
-     corresponding feature just no-ops (see `PENDING_SETUP.md`)
+     corresponding feature just no-ops
    - Do **not** set `PORT` — Render injects its own and the app already reads
      `process.env.PORT` (default 4000 only applies when unset).
 6. Deploy. Once live, note the Render URL (e.g. `https://pulsechat-api.onrender.com`) — you

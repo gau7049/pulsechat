@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   SERVER_EVENTS,
   type CreateStatusBody,
-  type LiveActiveEntryDto,
   type LiveSessionDto,
   type ReactToStatusBody,
   type RespondToPollBody,
@@ -90,14 +89,6 @@ export function usePollResults(statusId: string | null) {
     queryKey: ['status', 'poll-results', statusId],
     enabled: statusId !== null,
     queryFn: () => get<StatusPollResultsDto>(`/statuses/${statusId}/poll/results`),
-  });
-}
-
-export function useLiveActive() {
-  return useQuery({
-    queryKey: ['status', 'live-active'],
-    queryFn: () => get<{ items: LiveActiveEntryDto[] }>('/live/active'),
-    staleTime: 10_000,
   });
 }
 

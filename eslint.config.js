@@ -8,7 +8,18 @@ import globals from 'globals';
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/build/**', '**/coverage/**', '**/node_modules/**', '**/*.gen.ts'],
+    // support.js is a generated wireframe-viewer runtime (not app code, see
+    // its own header comment); shot.tmp.mjs is a local one-off screenshot
+    // script. Neither ships with the app or runs in CI.
+    ignores: [
+      '**/dist/**',
+      '**/build/**',
+      '**/coverage/**',
+      '**/node_modules/**',
+      '**/*.gen.ts',
+      'support.js',
+      'shot.tmp.mjs',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

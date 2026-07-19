@@ -9,3 +9,7 @@ prisma/migrations
 Technical Specification.md
 Web App Requirement Scope.md
 .claude/
+
+# Wireframe design reference + its generated runtime — not app source
+PulseChat Wireframes.dc.html
+support.js

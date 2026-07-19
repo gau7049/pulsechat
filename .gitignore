@@ -27,3 +27,11 @@ test-results/
 Thumbs.db
 
 # Prisma generated client lives in node_modules; keep migrations tracked
+
+# AI tooling — local dev process artifacts, not part of the public repo
+.claude/
+Claude Code Build Instructions.md
+ROADMAP.md
+PENDING_SETUP.md
+shot.tmp.mjs
+.thumbnail

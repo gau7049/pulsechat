@@ -5,7 +5,7 @@ friend-based social graph, 24-hour statuses, live streaming, and an Instagram-st
 built entirely on permanently-free services. A portfolio/learning build.
 
 Source-of-truth documents (repo root): `Requirement Spec.pdf` (product), `Technical Spec.pdf`
-(architecture), `Claude Code Build Instructions.md` (process & engineering bar).
+(architecture).
 
 ## Stack
 
@@ -35,8 +35,7 @@ pnpm db:seed                # demo data
 pnpm dev                    # api on :4000, web on :8000
 ```
 
-`pnpm lint · typecheck · test · build` must all pass before a change is done
-(Build Instructions §8–9).
+`pnpm lint · typecheck · test · build` must all pass before a change is done.
 
 ## Environment
 

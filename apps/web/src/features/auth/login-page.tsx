@@ -238,12 +238,7 @@ export function LoginPage() {
           <Button type="submit" loading={submitting} size="lg">
             Log in
           </Button>
-          <Button
-            variant="secondary"
-            type="button"
-            size="lg"
-            onClick={() => setShowMagic(true)}
-          >
+          <Button variant="secondary" type="button" size="lg" onClick={() => setShowMagic(true)}>
             ✉️ Send me a magic link instead
           </Button>
         </form>

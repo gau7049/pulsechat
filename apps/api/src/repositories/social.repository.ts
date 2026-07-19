@@ -183,12 +183,6 @@ export function acceptRequest(id: string, fromUserId: string, toUserId: string):
 
 // ── Blocks ───────────────────────────────────────────────────────────────────
 
-export function findBlock(blockerId: string, blockedId: string): Promise<Block | null> {
-  return prisma.block.findUnique({
-    where: { blockerId_blockedId: { blockerId, blockedId } },
-  });
-}
-
 export function findBlockBetween(a: string, b: string): Promise<Block | null> {
   return prisma.block.findFirst({
     where: {

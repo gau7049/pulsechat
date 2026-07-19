@@ -148,6 +148,7 @@ function patchConversations(
   );
 }
 
+/** Moves the conversation to the top of the list and bumps unread unless it's own/actively viewed. */
 function bumpConversation(queryClient: QueryClient, message: MessageDto, ownUserId: string): void {
   patchConversations(queryClient, (items) => {
     const target = items.find((c) => c.id === message.conversationId);
@@ -511,6 +512,10 @@ export function useChatSocketBridge(userId: string | undefined): void {
       for (const entry of outbox.pendingEntries()) {
         void attemptSend(queryClient, entry);
       }
+      // Ask the server for anything newer than what's cached, per conversation.
+      // `messagesKey` is `['chat', 'messages', conversationId]`, so key[2] recovers
+      // the id; page 0's first item is the newest message (history pages load
+      // backwards from there), so its sequence is the local high-water mark.
       const cached = queryClient.getQueriesData<MessagesData>({
         queryKey: ['chat', 'messages'],
       });
@@ -546,6 +551,7 @@ export function useChatSocketBridge(userId: string | undefined): void {
     socket.on('connect', onConnect);
     if (socket.connected) onConnect();
 
+    // Keeps this device's presence row from expiring server-side while the app is open.
     const heartbeat = setInterval(() => {
       if (socket.connected) socket.emit(CLIENT_EVENTS.PRESENCE_HEARTBEAT);
     }, 60_000);
