@@ -29,6 +29,7 @@ import * as usersRepo from '../../repositories/user.repository.js';
 import { AppError } from '../errors.js';
 import { authLimiter, emailLimiter } from '../middleware/rate-limit.js';
 import { requireAuth } from '../middleware/require-auth.js';
+import { requireSameOrigin } from '../middleware/require-same-origin.js';
 import { requireStepUp } from '../middleware/require-step-up.js';
 import { validateBody } from '../middleware/validate.js';
 
@@ -180,7 +181,7 @@ authRouter.post(
   },
 );
 
-authRouter.post('/auth/refresh', authLimiter, async (req, res) => {
+authRouter.post('/auth/refresh', requireSameOrigin, authLimiter, async (req, res) => {
   const raw: unknown = req.cookies?.[REFRESH_COOKIE];
   if (typeof raw !== 'string' || raw.length === 0) {
     throw new AppError('UNAUTHORIZED', 'Session expired — sign in again');
@@ -189,7 +190,7 @@ authRouter.post('/auth/refresh', authLimiter, async (req, res) => {
   sessionResponse(res, session);
 });
 
-authRouter.post('/auth/logout', requireAuth, async (req, res) => {
+authRouter.post('/auth/logout', requireSameOrigin, requireAuth, async (req, res) => {
   await auth.logout(req.auth!.deviceId, requestContext(req));
   res.clearCookie(REFRESH_COOKIE, { path: '/auth' });
   res.json({ loggedOut: true });

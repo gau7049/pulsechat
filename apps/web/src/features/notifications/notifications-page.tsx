@@ -1,10 +1,11 @@
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Avatar } from '../../components/ui/avatar';
 import { Button } from '../../components/ui/button';
 import { EmptyState } from '../../components/ui/empty-state';
 import { SkeletonRow } from '../../components/ui/skeleton';
 import { deepLinkFor, describeNotification, thumbnailFor } from './notification-utils';
-import { useNotifications } from './use-notifications';
+import { unreadCountFrom, useMarkAllRead, useNotifications } from './use-notifications';
 
 /**
  * §24.5 notification center — a dedicated, chronological, deep-linkable
@@ -13,7 +14,16 @@ import { useNotifications } from './use-notifications';
  */
 export function NotificationsPage() {
   const query = useNotifications();
+  const markAllRead = useMarkAllRead();
   const items = query.data?.pages.flatMap((page) => page.items) ?? [];
+
+  // §12 "marked read on view": the desktop sidebar links straight here, so the
+  // page clears the badge just like opening the bell dropdown does.
+  const unread = unreadCountFrom(query.data?.pages);
+  const markAllReadMutate = markAllRead.mutate;
+  useEffect(() => {
+    if (unread > 0) markAllReadMutate();
+  }, [unread, markAllReadMutate]);
 
   return (
     <main className="mx-auto flex w-full max-w-xl flex-col gap-4 px-4 py-8">

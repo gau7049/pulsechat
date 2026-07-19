@@ -17,7 +17,7 @@ export function Switch({
       className={`flex items-center justify-between gap-4 py-2 ${disabled ? 'opacity-50' : ''}`}
     >
       <span>
-        <span className="block text-sm font-medium text-fg">{label}</span>
+        <span className="block text-sm font-semibold text-fg">{label}</span>
         {description && <span className="block text-xs text-fg-muted">{description}</span>}
       </span>
       <button
@@ -34,7 +34,7 @@ export function Switch({
         <span
           aria-hidden
           className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform ${
-            checked ? 'translate-x-[22px]' : 'translate-x-0.5'
+            checked ? 'translate-x-5.5' : 'translate-x-0.5'
           }`}
         />
       </button>

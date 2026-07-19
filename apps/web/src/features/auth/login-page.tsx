@@ -161,6 +161,7 @@ export function LoginPage() {
   return (
     <AuthCard
       title="Welcome back"
+      subtitle="Log in to keep the conversation going."
       footer={
         <>
           New to PulseChat?{' '}
@@ -220,21 +221,14 @@ export function LoginPage() {
             />
             Remember me for 30 days
           </label>
-          <div className="flex items-center justify-between text-sm">
-            <button
-              type="button"
-              onClick={() => setShowMagic(true)}
-              className="text-accent hover:text-accent-strong"
-            >
-              Email me a link instead
-            </button>
+          <div className="flex items-center justify-between text-sm font-semibold">
+            <Link to="/restore-account" className="text-fg-muted hover:text-fg">
+              Restore a deleted account
+            </Link>
             <Link to="/forgot-password" className="text-accent hover:text-accent-strong">
               Forgot password?
             </Link>
           </div>
-          <Link to="/restore-account" className="text-sm text-fg-muted hover:text-fg">
-            Restore a deleted account
-          </Link>
           <TurnstileWidget onToken={setTurnstileToken} />
           {error && (
             <p role="alert" className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -242,7 +236,15 @@ export function LoginPage() {
             </p>
           )}
           <Button type="submit" loading={submitting} size="lg">
-            Sign in
+            Log in
+          </Button>
+          <Button
+            variant="secondary"
+            type="button"
+            size="lg"
+            onClick={() => setShowMagic(true)}
+          >
+            ✉️ Send me a magic link instead
           </Button>
         </form>
       )}

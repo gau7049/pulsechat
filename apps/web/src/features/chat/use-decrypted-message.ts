@@ -20,6 +20,29 @@ export function getCachedPlaintext(messageId: string): string | null | undefined
   return cache.get(messageId);
 }
 
+/**
+ * Non-hook decrypt-and-memoize, for bulk background passes (the media
+ * gallery's full-history scan) that can't run inside a component per message.
+ * Populates the same cache `useDecryptedMessage`/`getCachedPlaintext` read.
+ */
+export async function decryptAndCache(
+  userId: string,
+  conversation: ConversationDto,
+  message: { id: string; ciphertext: string; nonce: string },
+): Promise<string | null> {
+  const cached = cache.get(message.id);
+  if (cached !== undefined) return cached;
+  try {
+    const key = await getConversationKey(userId, conversation);
+    if (!key) return null;
+    const text = await decryptMessage(key, message.ciphertext, message.nonce);
+    cache.set(message.id, text);
+    return text;
+  } catch {
+    return null;
+  }
+}
+
 export type DecryptState =
   | { state: 'loading' }
   | { state: 'ok'; text: string }

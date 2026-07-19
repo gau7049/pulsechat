@@ -39,6 +39,7 @@ export function createConversation(input: {
     data: {
       type: input.type,
       name: input.name ?? null,
+      createdById: input.creatorId,
       members: {
         create: [
           { userId: input.creatorId, role: 'admin', wrappedKey: input.creatorWrappedKey },
@@ -48,6 +49,36 @@ export function createConversation(input: {
     },
     include: { members: { include: { user: { include: { privacy: true } } } } },
   });
+}
+
+/** Group photo update (admin-or-creator gated by the service). */
+export function updateGroupPhoto(
+  conversationId: string,
+  photoUrl: string,
+): Promise<ConversationWithMembers> {
+  return prisma.conversation.update({
+    where: { id: conversationId },
+    data: { photoUrl },
+    include: { members: { include: { user: { include: { privacy: true } } } } },
+  });
+}
+
+/** Atomically flip the admin role from one member to another. */
+export async function transferAdminRole(
+  conversationId: string,
+  fromUserId: string,
+  toUserId: string,
+): Promise<void> {
+  await prisma.$transaction([
+    prisma.conversationMember.update({
+      where: { conversationId_userId: { conversationId, userId: fromUserId } },
+      data: { role: 'member' },
+    }),
+    prisma.conversationMember.update({
+      where: { conversationId_userId: { conversationId, userId: toUserId } },
+      data: { role: 'admin' },
+    }),
+  ]);
 }
 
 /** The existing direct conversation between two users, if one exists. */
@@ -241,11 +272,20 @@ export function updateMessageContent(
   });
 }
 
-/** Delete for everyone: tombstone the row and drop the ciphertext (§14.3). */
-export function tombstoneMessage(id: string): Promise<Message> {
+/**
+ * Delete for everyone: tombstone the row and drop the ciphertext (§14.3).
+ * `deletedBy` is set only for a group admin's removal of someone else's
+ * message — left undefined for the sender's own delete.
+ */
+export function tombstoneMessage(id: string, deletedBy?: string): Promise<Message> {
   return prisma.message.update({
     where: { id },
-    data: { deletedForEveryoneAt: new Date(), ciphertext: '', nonce: '' },
+    data: {
+      deletedForEveryoneAt: new Date(),
+      ciphertext: '',
+      nonce: '',
+      ...(deletedBy ? { deletedBy } : {}),
+    },
   });
 }
 

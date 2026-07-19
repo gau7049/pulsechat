@@ -27,6 +27,8 @@ interface SignedUpload {
   publicId: string;
   signature: string;
   uploadUrl: string;
+  allowedFormats: string;
+  maxFileSize: number;
 }
 
 export async function uploadAttachment(
@@ -58,6 +60,8 @@ export async function uploadAttachment(
   form.append('signature', token.signature);
   form.append('folder', token.folder);
   form.append('public_id', token.publicId);
+  form.append('allowed_formats', token.allowedFormats);
+  form.append('max_file_size', String(token.maxFileSize));
 
   // XHR instead of fetch for upload progress.
   const url = await new Promise<string>((resolve, reject) => {
@@ -80,4 +84,30 @@ export async function uploadAttachment(
   });
 
   return { url, name: file.name, size: payload.size, mimeType: file.type };
+}
+
+/**
+ * Group photo upload: same signed-upload flow as attachments/avatars, but the
+ * token is scoped to one conversation and overwrites in place (stable public
+ * id server-side), so no compression step or size progress is needed here.
+ */
+export async function uploadGroupPhoto(conversationId: string, file: File): Promise<string> {
+  const token = await post<SignedUpload>(`/conversations/${conversationId}/photo-upload-token`);
+
+  const form = new FormData();
+  form.append('file', file);
+  form.append('api_key', token.apiKey);
+  form.append('timestamp', String(token.timestamp));
+  form.append('signature', token.signature);
+  form.append('folder', token.folder);
+  form.append('public_id', token.publicId);
+  form.append('overwrite', 'true');
+  form.append('allowed_formats', token.allowedFormats);
+  form.append('max_file_size', String(token.maxFileSize));
+
+  const upload = await fetch(token.uploadUrl, { method: 'POST', body: form });
+  if (!upload.ok) throw new Error('Upload failed');
+  const result = (await upload.json()) as { secure_url?: string };
+  if (!result.secure_url) throw new Error('Upload failed — try again');
+  return result.secure_url;
 }

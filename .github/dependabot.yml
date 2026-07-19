@@ -1,0 +1,19 @@
+# Weekly dependency-update PRs (M12). Grouped into one PR per ecosystem run so
+# CI (lint/typecheck/test/build) only has to pass a handful of times a week,
+# not once per package.
+version: 2
+updates:
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 10
+    groups:
+      npm-dependencies:
+        patterns:
+          - '*'
+
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'

@@ -4,6 +4,17 @@ import sodium from 'libsodium-wrappers-sumo';
  * Conversation content-key crypto (Technical Spec §6): one AES-256-GCM key per
  * conversation, generated client-side, sealed to each member's X25519 public
  * key with a libsodium sealed box. Message bodies are AES-GCM via WebCrypto.
+ *
+ * Known limitation, accepted deliberately (M12 security review): this key is
+ * static for the conversation's entire lifetime — there is no per-message
+ * ratcheting (no forward secrecy). If a member's private key is ever
+ * compromised, every past and future message sealed to it becomes readable.
+ * The server still never sees plaintext or the content key itself either way
+ * — this limitation is about a compromised *client*, not the server. Real
+ * forward secrecy needs Signal-protocol-style ratcheting, which is a
+ * substantial rework of this model; not undertaken here. Revisit if this
+ * project's threat model changes (e.g. a user's device is a realistic attack
+ * target, not just the server).
  */
 
 const B64 = () => sodium.base64_variants.ORIGINAL;

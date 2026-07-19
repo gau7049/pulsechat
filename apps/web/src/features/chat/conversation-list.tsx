@@ -114,7 +114,7 @@ function ConversationRowInner({
       className={({ isActive }) =>
         `flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${
           isActive ? 'bg-accent-soft' : 'hover:bg-surface-sunken'
-        }`
+        } ${conversation.muted ? 'opacity-55' : ''}`
       }
     >
       {conversation.type === 'direct' && other ? (
@@ -130,7 +130,7 @@ function ConversationRowInner({
                 📌
               </span>
             )}
-            <span className="truncate text-sm font-medium text-fg">{title}</span>
+            <span className="truncate text-sm font-bold text-fg">{title}</span>
           </span>
           <span className="shrink-0 text-[10px] text-fg-muted">
             {new Date(when).toLocaleDateString() === new Date().toLocaleDateString()

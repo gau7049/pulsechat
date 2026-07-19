@@ -78,6 +78,18 @@ export type CreateConversationBody = z.infer<typeof createConversationSchema>;
 export const addMemberSchema = conversationMemberInputSchema;
 export type AddMemberBody = z.infer<typeof addMemberSchema>;
 
+/** PATCH /conversations/:id/photo — group photo, creator-or-admin gated. */
+export const updateGroupPhotoSchema = z.object({
+  photoUrl: z.string().url().max(2048),
+});
+export type UpdateGroupPhotoBody = z.infer<typeof updateGroupPhotoSchema>;
+
+/** POST /conversations/:id/admin — hand the admin role to another member. */
+export const transferAdminSchema = z.object({
+  toUserId: z.string().uuid(),
+});
+export type TransferAdminBody = z.infer<typeof transferAdminSchema>;
+
 /** GET /conversations/:id/messages — cursor is a message sequence (exclusive). */
 export const messagesQuerySchema = paginationQuerySchema;
 
@@ -148,6 +160,8 @@ export interface MessageDto {
   forwardedFromId: string | null;
   editedAt: string | null;
   deletedForEveryoneAt: string | null;
+  /** True when a group admin removed someone else's message (not the sender). */
+  deletedByAdmin: boolean;
   createdAt: string;
   /** Everyone's reactions (§14.4); one per user by schema. */
   reactions: Array<{ userId: string; emoji: string }>;
@@ -170,6 +184,10 @@ export interface ConversationDto {
   id: string;
   type: 'direct' | 'group';
   name: string | null;
+  /** Group conversations only. */
+  photoUrl: string | null;
+  /** The original creator — keeps group-photo permission even after transferring admin. */
+  createdById: string | null;
   createdAt: string;
   members: ConversationMemberDto[];
   /** The viewer's sealed copy of the content key (Technical Spec §6). */

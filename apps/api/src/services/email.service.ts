@@ -37,15 +37,23 @@ function renderHtml(message: EmailMessage): string {
 
 export async function sendEmail(message: EmailMessage): Promise<void> {
   if (!env.BREVO_API_KEY) {
+    // Dev convenience only: the action link/OTP code is what makes local auth
+    // flows testable without a real mailbox. In production this would be a
+    // live auth-bypass token landing in plaintext logs, so it's redacted
+    // there — if this path is ever hit in a deployed environment, the fix is
+    // to set BREVO_API_KEY, not to go read the logs for the code (M12).
     logger.warn(
       {
         event: 'email.console_fallback',
         to: message.to,
         subject: message.subject,
-        actionUrl: message.actionUrl,
-        bodyLines: message.bodyLines,
+        ...(env.NODE_ENV === 'production'
+          ? {}
+          : { actionUrl: message.actionUrl, bodyLines: message.bodyLines }),
       },
-      `BREVO_API_KEY unset — email NOT sent. Action link/code is in this log entry.`,
+      env.NODE_ENV === 'production'
+        ? 'BREVO_API_KEY unset — email NOT sent (content redacted in production logs).'
+        : 'BREVO_API_KEY unset — email NOT sent. Action link/code is in this log entry.',
     );
     return;
   }

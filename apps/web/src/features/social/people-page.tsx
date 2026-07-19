@@ -175,7 +175,7 @@ function SuggestionsTab() {
       <EmptyState
         icon="✨"
         title="No suggestions yet"
-        description="Once you have a few friends, people you may know will show up here."
+        description="There's no one new to suggest right now — check back later."
       />
     );
   }
@@ -185,7 +185,11 @@ function SuggestionsTab() {
         <UserCard
           key={suggestion.user.id}
           user={suggestion.user}
-          subtitle={`${suggestion.mutualCount} mutual friend${suggestion.mutualCount === 1 ? '' : 's'}`}
+          subtitle={
+            suggestion.mutualCount > 0
+              ? `${suggestion.mutualCount} mutual friend${suggestion.mutualCount === 1 ? '' : 's'}`
+              : 'Suggested for you'
+          }
           action={
             <RelationshipButton
               userId={suggestion.user.id}

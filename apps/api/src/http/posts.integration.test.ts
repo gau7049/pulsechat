@@ -65,13 +65,17 @@ async function befriend(a: TestUser, b: TestUser): Promise<void> {
   expect(accepted.status).toBe(200);
 }
 
-async function createPost(user: TestUser, body: { caption?: string; mediaUrl?: string } = {}) {
+async function createPost(
+  user: TestUser,
+  body: { caption?: string; mediaUrl?: string; audience?: 'everyone' | 'friends' | 'only_me' } = {},
+) {
   const res = await asUser(user).post('/posts', {
     mediaUrl: body.mediaUrl ?? 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
     ...(body.caption ? { caption: body.caption } : {}),
+    ...(body.audience ? { audience: body.audience } : {}),
   });
   expect(res.status).toBe(201);
-  return res.body.post as { id: string; hashtags: string[]; likeCount: number };
+  return res.body.post as { id: string; hashtags: string[]; likeCount: number; isPublic: boolean };
 }
 
 afterAll(async () => {
@@ -114,6 +118,30 @@ describe('post visibility (§13.3, reuses the profile visibility gate)', () => {
     const post = await createPost(author, { caption: 'public post' });
     expect((await asUser(stranger).get(`/posts/${post.id}`)).status).toBe(200);
   });
+
+  it('marks isPublic true only when the author is public AND the post audience is everyone', async () => {
+    const publicAuthor = await registerUser();
+    const trulyPublic = await createPost(publicAuthor, { caption: 'open to all' });
+    expect(trulyPublic.isPublic).toBe(true);
+
+    // A public author can still narrow an individual post's audience (§24.7)
+    // — narrowed posts are not downloadable even though the account is public.
+    const narrowed = await createPost(publicAuthor, {
+      caption: 'friends only',
+      audience: 'friends',
+    });
+    expect(narrowed.isPublic).toBe(false);
+
+    // A friends/private-visibility author's post is never strictly public,
+    // even if they set audience to everyone — the account gate can't be beaten.
+    const guardedAuthor = await registerUser();
+    await setVisibility(guardedAuthor, 'friends');
+    const guardedPost = await createPost(guardedAuthor, {
+      caption: 'trying to go wide',
+      audience: 'everyone',
+    });
+    expect(guardedPost.isPublic).toBe(false);
+  });
 });
 
 describe('likes, saves, comments (§13.5)', () => {
@@ -132,6 +160,32 @@ describe('likes, saves, comments (§13.5)', () => {
     const unliked = await asUser(liker).post(`/posts/${post.id}/like`);
     expect(unliked.body).toEqual({ liked: false });
     expect((await asUser(author).get(`/posts/${post.id}`)).body.post.likeCount).toBe(0);
+  });
+
+  it('does not stack a duplicate like notification after unlike→relike, even once read', async () => {
+    const author = await registerUser();
+    const liker = await registerUser({ displayName: 'Liker Person' });
+    const post = await createPost(author);
+
+    expect((await asUser(liker).post(`/posts/${post.id}/like`)).body).toEqual({ liked: true });
+    let notifications = await prisma.notification.findMany({
+      where: { userId: author.id, type: 'post_like' },
+    });
+    expect(notifications).toHaveLength(1);
+
+    // The author reads it (marked read on view, §12) before the re-like.
+    expect((await asUser(author).post('/notifications/read-all')).status).toBe(200);
+
+    expect((await asUser(liker).post(`/posts/${post.id}/like`)).body).toEqual({ liked: false });
+    expect((await asUser(liker).post(`/posts/${post.id}/like`)).body).toEqual({ liked: true });
+
+    notifications = await prisma.notification.findMany({
+      where: { userId: author.id, type: 'post_like' },
+    });
+    // Still exactly one row — refreshed in place, not duplicated — and it
+    // resurfaces as unread since this is a new-to-them event.
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]!.readAt).toBeNull();
   });
 
   it('toggles saves privately without touching the like counter or notifying', async () => {

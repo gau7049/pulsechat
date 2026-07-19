@@ -53,6 +53,14 @@ export interface PostDto {
   mediaUrl: string | null;
   caption: string | null;
   audience: PostAudience;
+  /**
+   * True only when the author's account is public AND the post's own
+   * audience is `everyone` — the two-part rule `assertProfileVisible`/
+   * `assertCanView` actually enforce (a stranger needs both). Drives whether
+   * the client offers a download and whether it applies content-protection
+   * deterrents (watermark, right-click/drag blocking).
+   */
+  isPublic: boolean;
   /** Extracted from the caption at creation time (§13.1); empty for non-public authors. */
   hashtags: string[];
   /** §24.2 tagged users — distinct from @mentions parsed out of the caption text. */

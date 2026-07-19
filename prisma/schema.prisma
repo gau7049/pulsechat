@@ -91,6 +91,7 @@ model User {
   notifications       Notification[]
   auditLogEntries     AuditLogEntry[]
   invites             Invite[]
+  createdConversations Conversation[] @relation("ConversationCreator")
 
   @@map("users")
 }
@@ -271,14 +272,20 @@ enum ConversationType {
 }
 
 model Conversation {
-  id        String           @id @default(uuid())
-  type      ConversationType
+  id          String           @id @default(uuid())
+  type        ConversationType
   /// Group conversations only.
-  name      String?
-  createdAt DateTime         @default(now()) @map("created_at")
+  name        String?
+  /// Group conversations only (Cloudinary URL, §group photo).
+  photoUrl    String?          @map("photo_url")
+  /// The original creator — keeps group-photo permission for life even after
+  /// transferring the admin role (distinct from the transferable `admin` role).
+  createdById String?          @map("created_by_id")
+  createdAt   DateTime         @default(now()) @map("created_at")
 
-  members  ConversationMember[]
-  messages Message[]
+  createdBy User?                @relation("ConversationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  members   ConversationMember[]
+  messages  Message[]
 
   @@map("conversations")
 }
@@ -321,6 +328,9 @@ model Message {
   forwardedFromId     String?   @map("forwarded_from_id")
   editedAt            DateTime? @map("edited_at")
   deletedForEveryoneAt DateTime? @map("deleted_for_everyone_at")
+  /// Set only when a group admin removed someone else's message (distinct from
+  /// the sender's own "delete for everyone") — lets the UI say who acted.
+  deletedBy           String?   @map("deleted_by")
   /// Server-assigned, monotonic per conversation — total message order (§21.2).
   sequence            Int
   /// Client-generated idempotency key — duplicate sends detected and no-op'd.

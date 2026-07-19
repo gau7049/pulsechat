@@ -182,7 +182,11 @@ export function MessageBubble({
           )}
 
           {deleted ? (
-            <p className="text-xs italic opacity-70">🚫 This message was deleted</p>
+            <p className="text-xs italic opacity-70">
+              {message.deletedByAdmin
+                ? '🚫 This message was removed by an admin'
+                : '🚫 This message was deleted'}
+            </p>
           ) : (
             <BubbleContent
               decrypted={decrypted}
@@ -689,6 +693,10 @@ function MessageMenu({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [reporting, setReporting] = useState(false);
 
+  const myRole = conversation.members.find((m) => m.user.id === userId)?.role;
+  const isGroupAdmin = conversation.type === 'group' && myRole === 'admin';
+  const canRemoveForEveryone = own || isGroupAdmin;
+
   function onError(error: unknown) {
     toast(error instanceof ApiError ? error.message : 'Something went wrong', { kind: 'error' });
   }
@@ -791,7 +799,10 @@ function MessageMenu({
         <Modal open onClose={() => setConfirmingDelete(false)} title="Delete message?">
           <p className="text-sm text-fg-muted">
             "Delete for me" only hides it from your view.
-            {own && ' "Delete for everyone" removes it for all members.'}
+            {canRemoveForEveryone &&
+              (own
+                ? ' "Delete for everyone" removes it for all members.'
+                : ' As the group admin, you can also remove it for all members.')}
           </p>
           <div className="mt-4 flex flex-wrap justify-end gap-2">
             <Button variant="secondary" onClick={() => setConfirmingDelete(false)}>
@@ -809,7 +820,7 @@ function MessageMenu({
             >
               Delete for me
             </Button>
-            {own && (
+            {canRemoveForEveryone && (
               <Button
                 variant="danger"
                 loading={remove.isPending}
@@ -820,7 +831,7 @@ function MessageMenu({
                   )
                 }
               >
-                Delete for everyone
+                {own ? 'Delete for everyone' : 'Remove for everyone'}
               </Button>
             )}
           </div>

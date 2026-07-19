@@ -305,6 +305,25 @@ describe('suggestions (people you may know)', () => {
       after.body.items.find((s: { user: { id: string } }) => s.user.id === dave.id),
     ).toBeUndefined();
   });
+
+  it('still suggests other users for a brand-new account with zero friends', async () => {
+    const freshAccount = await registerUser();
+    const someoneElse = await registerUser();
+
+    const res = await asUser(freshAccount).get('/friends/suggestions');
+    expect(res.status).toBe(200);
+    // No friends-of-friends signal exists yet, so every result is filler —
+    // but the section must not be empty just because the account is new.
+    expect(res.body.items.length).toBeGreaterThan(0);
+    expect(res.body.items.every((s: { mutualCount: number }) => s.mutualCount === 0)).toBe(true);
+
+    // Once friends, an already-friended user never shows up as a suggestion.
+    await befriend(freshAccount, someoneElse);
+    const after = await asUser(freshAccount).get('/friends/suggestions');
+    expect(
+      after.body.items.find((s: { user: { id: string } }) => s.user.id === someoneElse.id),
+    ).toBeUndefined();
+  });
 });
 
 describe('blocking (§10.2)', () => {

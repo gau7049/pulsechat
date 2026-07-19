@@ -6,13 +6,16 @@ import { Button } from '../../components/ui/button';
 import { Modal } from '../../components/ui/modal';
 import { ProgressiveImage } from '../../components/ui/progressive-image';
 import { useToast } from '../../components/ui/toast';
+import { useAuth } from '../auth/auth-context';
 import { ReportModal } from '../reports/report-modal';
+import { downloadImage, watermarkedImageUrl, watermarkLabel } from './post-protection';
 import { PostText } from './post-text';
 import { ShareToChatModal } from './share-to-chat-modal';
 import { useDeletePost, useRemoveMyTag, useToggleLike, useToggleSave } from './use-posts';
 
 /** Feed/hashtag/explore card (§13). `/p/:id` carries the full detail + comments. */
 export function PostCard({ userId, post }: { userId: string; post: PostDto }) {
+  const { user } = useAuth();
   const { toast } = useToast();
   const like = useToggleLike();
   const save = useToggleSave();
@@ -22,6 +25,19 @@ export function PostCard({ userId, post }: { userId: string; post: PostDto }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [heartPop, setHeartPop] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  async function download(): Promise<void> {
+    if (!post.mediaUrl) return;
+    setDownloading(true);
+    try {
+      await downloadImage(post.mediaUrl, `pulsechat-${post.author.username}-${post.id}.jpg`);
+    } catch {
+      toast('Could not download this image', { kind: 'error' });
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   // §13.5 like polish: pop a big heart over the image, Instagram-style,
   // whenever a like lands (not on unlike).
@@ -90,7 +106,16 @@ export function PostCard({ userId, post }: { userId: string; post: PostDto }) {
       <div className="relative">
         {post.mediaUrl ? (
           <Link to={`/p/${post.id}`}>
-            <ProgressiveImage src={post.mediaUrl} alt="" aspectClassName="aspect-[4/5]" />
+            <ProgressiveImage
+              src={
+                post.isPublic || !user
+                  ? post.mediaUrl
+                  : watermarkedImageUrl(post.mediaUrl, watermarkLabel(user.username))
+              }
+              alt=""
+              aspectClassName="aspect-[4/5]"
+              protectedContent={!post.isPublic}
+            />
           </Link>
         ) : (
           // §24.1 text-only post — no media slot, just the caption card below.
@@ -138,6 +163,18 @@ export function PostCard({ userId, post }: { userId: string; post: PostDto }) {
         >
           📤
         </button>
+        {post.isPublic && post.mediaUrl && (
+          <button
+            type="button"
+            aria-label="Download image"
+            title="Download image"
+            disabled={downloading}
+            onClick={() => void download()}
+            className="text-fg-muted hover:text-fg disabled:opacity-50"
+          >
+            {downloading ? '…' : '⬇️'}
+          </button>
+        )}
         <button
           type="button"
           aria-label={post.savedByMe ? 'Unsave' : 'Save'}
@@ -243,14 +280,20 @@ export function PostCard({ userId, post }: { userId: string; post: PostDto }) {
 
 /** Instagram-style square grid tile — used on the profile page. */
 export function PostThumbnail({ post }: { post: PostDto }) {
+  const { user } = useAuth();
   return (
     <Link to={`/p/${post.id}`} className="group block overflow-hidden rounded-lg">
       {post.mediaUrl ? (
         <ProgressiveImage
-          src={post.mediaUrl}
+          src={
+            post.isPublic || !user
+              ? post.mediaUrl
+              : watermarkedImageUrl(post.mediaUrl, watermarkLabel(user.username))
+          }
           alt=""
           aspectClassName="aspect-square"
           imgClassName="transition-transform group-hover:scale-105"
+          protectedContent={!post.isPublic}
         />
       ) : (
         <div className="flex aspect-square items-center justify-center bg-surface-sunken p-2 text-center">

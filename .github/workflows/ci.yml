@@ -37,6 +37,13 @@ jobs:
       - run: pnpm exec prisma migrate deploy
         # No-op until the first migration exists; validates migrations after.
         continue-on-error: false
+      # M12: fail the build on a high/critical known vulnerability in what
+      # actually ships to production — `--prod` excludes dev-only tooling
+      # (e.g. artillery, used solely by the local-only `pnpm test:load`),
+      # which would otherwise fail this on vulnerabilities nothing runtime
+      # ever depends on. Dependabot (.github/dependabot.yml) handles the
+      # ongoing "keep everything, including dev deps, patched" side.
+      - run: pnpm audit --prod --audit-level=high
       - run: pnpm lint
       - run: pnpm format:check
       - run: pnpm typecheck

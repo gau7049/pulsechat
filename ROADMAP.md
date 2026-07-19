@@ -4,6 +4,11 @@
 > in the repo root: `Web App Requirement Scope.md` + `Technical Specification.md` (markdown — the
 > matching PDFs are image-only scans of the same content) and `Claude Code Build Instructions.md`.
 > Update the checkboxes and the "Session log" as milestones progress.
+>
+> Two companion docs split out of this file's former "Environment"/"Pending manual setup"
+> sections: **`PENDING_SETUP.md`** (every provider key/account still a placeholder, and why it
+> doesn't block dev) and **`DEPLOYMENT.md`** (the actual Vercel/Render/Supabase/B2 deploy
+> runbook). This file still owns the milestone history and session log.
 
 ## Fixed decisions
 
@@ -586,60 +591,294 @@ external provider) and §6.2 is pure auth-flow logic.
 
 All gates green: lint, format, typecheck, 131 API tests + 17 shared tests, both builds.
 
-## Environment / provider state
+### ✅ M11 — Group admin controls, date separators & media gallery (DONE — awaiting user browser review)
 
-| Item                    | Status                                                                                                                                  |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Supabase `DATABASE_URL` | ✅ in `.env`, migrations applied through `m10_session_and_story_extensions`                                                             |
-| JWT secrets             | ✅ dev values in `.env` (regenerate fresh ones in Render at deploy)                                                                     |
-| Turnstile site + secret | ✅ working                                                                                                                              |
-| Cloudinary              | ✅ working (avatar upload signed path)                                                                                                  |
-| Brevo                   | ⚠️ key in `.env` is an **SMTP** key (`xsmtpsib-`) — REST needs an **API** key (`xkeysib-`); until swapped, emails print to API terminal |
-| TURN (coturn)           | ⬜ code ships STUN-only-safe (M5 done); Oracle VM provisioning still pending, see below                                                 |
-| VAPID                   | ⬜ code ships push-ready (M7 done); keys not yet generated — Web Push is a no-op until they land                                        |
-| TMDB                    | ⬜ code ships trending-safe (M9 done); no key yet — sweep skips movies, keeps Deezer songs fresh                                        |
-| Deploy accounts         | ⬜ not needed until deploy                                                                                                              |
+User browser-review feedback on the group-chat feature (not a spec addendum this time): a
+visible group member list + group photo, admin-only controls (add/remove members, delete any
+message, transfer admin), a mandatory-admin-before-leaving safety rail, WhatsApp-style sticky
+date separators, and a shared-media gallery for every conversation. A pre-build survey found the
+backend already returned the full member list to every member and already admin-gated add/
+remove-member — those just had no frontend surface; everything else was genuinely missing.
 
-## Pending manual setup (owner-tracked, not blocking coding)
+Schema: one additive migration `m11_group_admin_media` — `Conversation` gains
+`photoUrl`/`createdById` (the creator keeps group-photo permission for life, independent of the
+transferable `admin` role); `Message` gains `deletedBy` (set only when a group admin removes
+someone else's message, so the UI can say "removed by an admin" instead of the sender's own
+generic "deleted").
 
-Coding for the milestone that needs each of these proceeds without them — STUN-only calling
-and a placeholder track list stand in until the real values arrive. Do these whenever
-convenient; tell the agent the resulting values/files when ready and it will wire them in.
+Backend (5 new tests in `m11.integration.test.ts`; 136 API tests + 17 shared tests total):
 
-- ⬜ **Oracle Cloud Always-Free VM + coturn** (M5 shipped STUN-only; this improves call/live
-  reliability across strict NATs once provisioned) — steps in `infra/coturn/README.md`, ~30 min.
-  Produces `TURN_HOST` and `TURN_SHARED_SECRET` for `.env`; `turn.service.ts` picks them up
-  automatically, no code change needed.
-- ⬜ **CC0 status background music** (M5 shipped with a 6-track placeholder catalog in
-  `packages/shared/src/status-music.ts`) — pick short tracks from Free Music Archive / Pixabay
-  Music / Chosic (CC0, no attribution required), drop the files at `apps/web/public/audio/status/`
-  - license info in the repo; swapping the catalog's `fileUrl`s is a data-only change.
-- ⬜ **VAPID keypair** (needed by M7 for Web Push) — `npx web-push generate-vapid-keys`, then
-  `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VITE_VAPID_PUBLIC_KEY` in `.env`.
-- ⬜ **Brevo API key swap** (blocks real email delivery, not local dev — emails currently print
-  to the API terminal) — the `.env` key is an SMTP key (`xsmtpsib-`); the REST API Brevo calls
-  need an API key (`xkeysib-`) from the Brevo dashboard.
-- ⬜ **Real ToS/Privacy Policy copy** (needed by M7 close-out, Requirement Scope §19) — legal
-  content is a human decision; placeholder copy is already live and clearly marked.
-- ⬜ **First deploy accounts** (Vercel, Render, Backblaze B2, UptimeRobot) — needed at actual
-  deploy time, not before, per Build Instructions §4.
-- ⬜ **Playwright browser binary** (needed once, before the first `pnpm test:e2e`) —
-  `pnpm exec playwright install chromium`. Not run automatically (see M8: build-script approval
-  was deliberately declined for `@playwright/browser-chromium` in `pnpm-workspace.yaml`, so this
-  stays an explicit, deliberate step).
-- ⬜ **TMDB API key** (needed by M9 §24.3 for trending movies) — free-tier signup at
-  themoviedb.org, then `TMDB_API_KEY` in `.env`. Deezer (trending songs) needs no key. M9's
-  trending-cache job can ship and be tested against Deezer alone in the meantime, same
-  no-op-until-configured pattern used elsewhere in this doc.
-- ⬜ **PWA real-device install testing** (needed by M9 §24.9 close-out) — one real Android
-  device and one real iOS device: verify install prompt/home-screen icon, offline shell load,
-  push delivery in the installed/standalone context, camera/attachment picker, and touch-target
-  sizing. Manual step, no paid device-farm service.
-- ⬜ **Real PNG app icons** (M9 shipped `apps/web/public/icon.svg`, a simple placeholder mark,
-  referenced from both the manifest and `apple-touch-icon`) — Android/Chrome/Edge accept an SVG
-  manifest icon fine, but iOS's Add-to-Home-Screen icon support for SVG is inconsistent across
-  versions. Swap in real 192px/512px PNGs (plus a dedicated apple-touch-icon PNG) once real
-  branding art exists — a data-only asset swap, same pattern as M5's placeholder music catalog.
+- Group photo: `POST /conversations/:id/photo-upload-token` + `PATCH /conversations/:id/photo`,
+  creator-or-admin gated (`assertGroupPhotoPermission`, shared by both routes so the token can't
+  be minted by someone who'd then 403 on the persist step), reusing the avatar upload's signed-
+  Cloudinary-URL pattern with a stable per-conversation public id (overwrite in place).
+- Admin transfer: `POST /conversations/:id/admin` — current-admin-only, atomically flips both
+  `ConversationMember.role` rows in one transaction (`transferAdminRole`).
+- Sole-admin leave guard: `removeMember` now rejects a self-leave from the group's admin with
+  409 CONFLICT ("transfer admin role... before leaving") — the group always has an active admin.
+- Group-admin message removal: `deleteMessage`'s `scope=everyone` path now also allows a group
+  admin to tombstone another member's message (previously sender-only in every conversation
+  type); `deletedBy` is only set on that admin-override path, never on the sender's own delete,
+  and direct-conversation delete is unchanged (still strictly sender-only — confirmed by a
+  regression test).
+- `ConversationDto` gained `photoUrl`/`createdById`; `MessageDto` gained `deletedByAdmin`
+  (server-derived: `deletedBy` set and not equal to the sender).
+
+Frontend:
+
+- `group-info-modal.tsx`: WhatsApp-style group info panel — photo (tap to change if creator-or-
+  admin), full member list with admin badges (no new fetch, already on `conversation.members`),
+  admin-only remove/make-admin per row, an add-members flow that wraps the conversation's content
+  key for each new member exactly like `new-chat-modal.tsx` does at creation time, and a "Leave
+  group" footer that now surfaces the server's actual error message (so the sole-admin block
+  reaches the user) instead of a generic toast.
+- `media-gallery-modal.tsx`: since attachments live inside the E2E-encrypted envelope, the server
+  can't index them — on open, this pages through the *entire* conversation history via the
+  existing cursor endpoint, decrypts every message client-side, and indexes it into Media
+  (image/video) and Files (document/audio) tabs; tapping an item jumps back into the chat via the
+  existing `scrollToMessage`. A conscious scope decision (confirmed with the user): build the
+  complete index on first open rather than scoping to only already-loaded messages like the
+  existing in-chat search — correctness over the cost of one full decrypt pass, cached
+  client-side afterward.
+- `date-utils.ts` (`groupByDay`): chat history and the outbox are merged into one chronological
+  timeline, then bucketed into day groups, each prefixed by a `position: sticky` date chip inside
+  the existing scroll container — the WhatsApp "date stays pinned while that day scrolls past"
+  behavior falls out of plain CSS sticky positioning, no scroll-listener needed.
+- `chat-window.tsx`: the group header's name/avatar is now a button opening `GroupInfoModal`
+  (parity with the direct-chat header's link to the profile); the conversation menu gained
+  "Group info" and "Media, links & docs" (the latter universal — both direct and group chats).
+- `message-bubble.tsx`: the message action menu now shows "Remove for everyone" (relabeled from
+  "Delete for everyone") when the viewer is a group admin acting on someone else's message; the
+  tombstone renders "removed by an admin" instead of the generic "was deleted" copy when
+  `deletedByAdmin` is true.
+
+All gates green: lint, format, typecheck, 136 API tests + 17 shared tests, both builds. Pending:
+user browser walkthrough (two accounts, one 3+ member group) — see the session log for the
+specific checklist.
+
+**Post-M11 fixes (same day, from user browser-review feedback on unrelated pre-existing
+features):**
+
+- **Suggestions showed nobody.** `social.service.ts#suggestions` was pure friends-of-friends
+  with a hard `if (friendIds.length === 0) return []` — any account with zero friends (a fresh
+  signup, the exact case a "people you may know" feature exists for) got nothing, and it never
+  broadened beyond two-hop mutuals even for established accounts. Changed to friends-of-friends
+  ranked first when that signal exists, filling the rest of the quota with any other active,
+  non-friend/non-blocked/non-pending user (new `user.repository.ts#listActiveUsersExcluding`,
+  newest signups first) so the section is never empty. New regression test in
+  `social.integration.test.ts`.
+- **Duplicate "liked your post" notifications on unlike→relike.** The M9 dedup fix only matched
+  against *unread* rows (`findUnreadDuplicate`), but both the bell and the notifications page
+  mark everything read the instant they're opened (§12) — so liking, having it read, unliking,
+  then re-liking no longer found the original row and created a second one. Widened the dedup
+  scan to match read rows too (renamed `findDuplicate`), refreshing the existing row's timestamp
+  and resetting it to unread (a relike after being read is genuinely new to the recipient again)
+  instead of ever creating a second row; push only fires when the prior row wasn't already
+  sitting unread on their device. New regression test in `posts.integration.test.ts` covering
+  the exact like→unlike→read→relike sequence.
+
+All gates re-verified green after both fixes (136 API tests + 2 new = 138 total, both builds).
+
+**Download for public posts + content-protection deterrents (same day, from user review
+feedback):**
+
+- **Download**: `PostDto` gained a server-computed `isPublic` boolean (`post.service.ts`'s
+  `toPostDtoFrom`) — true only when `author.visibility === 'public' AND post.audience ===
+  'everyone'`, mirroring the exact two-part rule `assertProfileVisible`/`assertCanView` already
+  enforce (the client previously had no way to know the author's account visibility, only the
+  post's own `audience`, which a friends/private author can still set to `everyone` without it
+  becoming stranger-visible). `PostCard` shows a Download button only when `isPublic`, using a
+  fetch-as-blob helper (`features/posts/post-protection.ts#downloadImage`) since a plain `<a
+  download>` doesn't reliably force cross-origin downloads.
+- **Screenshot/recording "protection"**: evaluated and confirmed there is no browser API on any
+  platform to detect or block OS-level screenshots, screen recording, or screen sharing, and
+  Netflix-style DRM (EME/Widevine) only applies to encrypted video streams — not applicable to
+  photo posts, and disproportionate infrastructure (license server, DRM provider contract) for
+  what this feature actually is. Confirmed the realistic scope with the user up front rather than
+  building either nothing or false-confidence theater. Shipped: a forensic watermark
+  (`@viewer_username · date`) baked into the served image via a Cloudinary URL text-overlay
+  transform (`watermarkedImageUrl` — survives screenshots *and* "Save image as," unlike a CSS
+  overlay, since it's baked into the pixels Cloudinary actually serves), right-click/drag-save
+  disabled on the image element, and a print stylesheet rule hiding protected images — applied to
+  every post where `isPublic` is false (`PostCard` and the profile-grid `PostThumbnail`, both via
+  a new `protectedContent` prop on `ProgressiveImage`). None of this is a security boundary, only
+  friction + traceability — documented as such in `post-protection.ts`'s file comment so it's
+  never mistaken for real prevention later.
+- One new regression test (`posts.integration.test.ts`) covering all three `isPublic` cases:
+  public author + everyone audience → true; public author with a post narrowed to `friends` →
+  false; friends/private-visibility author who sets `audience: 'everyone'` anyway → still false
+  (the account gate can't be beaten by the post-level field).
+
+All gates green (lint, format, typecheck, 139 API tests total, both builds).
+
+### 📋 M12 — Security hardening (PLANNED, not yet built)
+
+From the 2026-07-17 feature/security review. All items here are independent, additive, and low-risk
+to build in any order — cheapest milestone on this list (mostly middleware/config, one documented
+non-change) and a reasonable candidate to do first regardless of what else gets picked up next.
+
+Backend:
+
+- **Security headers**: add `helmet()` to `apps/api/src/http/app.ts` (CSP, HSTS, X-Frame-Options,
+  X-Content-Type-Options). CSP needs care — `img-src`/`media-src` must keep allowing
+  `res.cloudinary.com`, and the Socket.IO/WebRTC connections need `connect-src` covering the API
+  origin and STUN/TURN hosts.
+- **Signed-upload constraints**: extend `cloudinary.service.ts`'s `signUpload`/`signAttachmentUpload`/
+  `signGroupPhotoUpload` to include `allowed_formats`/`max_file_size` (and pin `resource_type`
+  explicitly) inside the signed parameter set, so the constraint travels with the signature itself
+  instead of only being a client-side check in `attachments.ts`.
+- **Dev-mode email-logging fallback**: gate the plaintext magic-link/OTP/reset-link logging in
+  `email.service.ts` behind an explicit `NODE_ENV !== 'production'` check — or simpler, make
+  production refuse to boot without `BREVO_API_KEY` set, the same pattern `env.ts` already uses for
+  `DATABASE_URL`.
+- **CSRF defense-in-depth**: add an Origin/Referer header check on `POST /auth/refresh` and
+  `POST /auth/logout` (reject on a present-but-mismatched-with-`APP_ORIGIN` header) — additive to the
+  existing `sameSite: strict` cookie protection, not a replacement for it.
+- **Per-user rate limiting**: layer a per-user limiter (keyed by `req.auth.sub`) on top of the
+  existing per-IP `apiLimiter` for authenticated routes, so a distributed multi-IP attacker on one
+  compromised account is still bounded.
+- **Dependency scanning**: add `.github/dependabot.yml` (weekly, npm ecosystem) and a
+  `pnpm audit --audit-level=high` step in `ci.yml`'s `verify` job.
+- **Forward secrecy — documented limitation, not a build item**: true per-message ratcheting
+  (Signal-protocol-style) would be a substantial rework of the static-content-key model in
+  `lib/crypto/conversation-keys.ts`, which is otherwise sound (ciphertext-only server, no plaintext
+  leakage). Recommend documenting this as an accepted, known limitation (a code comment + a line in
+  Requirement Scope's §6 area) rather than building it — flag if priorities change.
+
+Frontend: none required beyond what the backend items above touch.
+
+### 📋 M13 — Chat trust & expression: voice messages, threads, disappearing messages, safety numbers (PLANNED)
+
+Schema (one additive migration):
+
+- `Message` gains `expiresAt DateTime?` (disappearing messages — mirrors `Status.expiresAt`'s existing
+  cron-sweep idiom in `status.service.ts#startExpirySweep`, reused verbatim for messages) and
+  `threadRootId String?` (self-relation — which top-level message a thread belongs to, distinct from
+  the existing `replyToId`, which stays as "quote this one message").
+- No new table for voice messages — they reuse the existing attachment envelope
+  (`message-envelope.ts`'s `type: 'audio'` case already exists); just add `duration`/`waveform` to
+  `AttachmentMeta`.
+
+Backend:
+
+- **Disappearing messages**: the existing per-member `PATCH /conversations/:id` settings endpoint
+  gains a conversation-level `disappearingSeconds` default; `sendMessage` stamps `expiresAt` from it;
+  reuse the sweep-and-hard-delete pattern already proven for `Status` and the trending-cache jobs.
+- **Message threads**: new `GET /conversations/:id/messages/:messageId/thread` — everything sharing
+  that `threadRootId`, ordered like the main history endpoint; `message:send` accepts an optional
+  `threadRootId` alongside the existing `replyToId`.
+- **Safety numbers**: no new endpoint — the public key already reaches the client on every
+  `ConversationMemberDto`; this is almost entirely a frontend feature.
+
+Frontend:
+
+- **Voice messages**: `MediaRecorder` capture in the composer (mic button, hold-to-record), a
+  waveform preview, reusing `uploadAttachment`'s existing pipeline end to end.
+- **Message threads**: a thread panel opened from a message's action menu (alongside the existing
+  reply/forward/star row) — a filtered view over the new thread endpoint; the composer posts back
+  into the same thread.
+- **Disappearing messages**: a per-conversation toggle in `GroupInfoModal`/the direct-chat menu
+  (reuses the existing settings-menu pattern), a small "🔥 disappearing" header indicator when active,
+  and a countdown/removal animation on expiry (reuses the `MESSAGE_DELETED` live-event pattern).
+- **Safety numbers**: compute a short fingerprint from each member's `publicKey` (grouped digits,
+  Signal's "safety number" convention) and add a "Verify encryption" panel to `GroupInfoModal`/the
+  direct-chat header comparing your device's view of the other party's key. This one item satisfies
+  both the feature request (#10) and the security-review gap (#16/#6) from the same report — planned
+  once, not duplicated.
+
+### 📋 M14 — Posts & discovery expansion: carousel posts, link previews, nested comments, full-text search (PLANNED)
+
+Schema (one additive migration):
+
+- `Post.mediaUrl` (single) → a new `PostMedia` table (`postId`, `url`, `order`); existing single-image
+  posts keep working via a one-row backfill.
+- `Comment` gains `parentCommentId String?` self-relation (one level of nesting, matching Instagram —
+  not infinitely nested).
+- No schema change needed for link previews (computed at read time, not stored) or search.
+
+Backend:
+
+- **Carousel posts**: `createPostSchema` accepts `mediaUrls: string[]` (capped, e.g. 10) instead of
+  one `mediaUrl`; `PostDto` exposes an ordered `media: string[]`.
+- **Link previews**: new `GET /link-preview?url=` — fetches the URL **server-side** (never
+  client-side, so a viewer's IP is never leaked to an arbitrary third-party site) and scrapes Open
+  Graph tags with a short timeout, cached in-process (reusing `lib/cache.ts`'s existing node-cache
+  pattern from M8's feed caching). The existing §14.7 safety interstitial stays exactly as-is for the
+  "are you sure" step — this only adds the rich card feeding into it.
+- **Nested comments**: `POST /posts/:id/comments` accepts an optional `parentCommentId`; the list
+  endpoint returns one level of threading.
+- **Full-text search**: new `GET /search/posts?q=` over public-audience, public-author posts only,
+  reusing the exact `assertCanView`/`assertProfileVisible` gate already enforced elsewhere. Default to
+  a plain Prisma `contains`/`insensitive` match on caption text (keeps the project's clean
+  zero-raw-SQL track record) — only reach for Postgres full-text search (`tsvector`) later if caption
+  volume ever makes substring matching too slow.
+
+Frontend:
+
+- **Carousel posts**: a swipeable/dot-indicator viewer in `PostCard`, multi-select in the composer
+  (reuses the existing `ImageAnnotator`/compression pipeline per image).
+- **Link previews**: a rich preview card wherever `linkified-text.tsx` currently just detects a URL,
+  in both chat and post captions.
+- **Nested comments**: an indented reply row + "Reply" action in the comments panel.
+- **Full-text search**: a search bar on the Explore page hitting the new endpoint.
+
+### 📋 M15 — Group video/audio calls, N-way (PLANNED — needs a decision before detailed design)
+
+**Open decision, worth resolving before I plan the rest of this milestone:** mesh WebRTC (every
+participant connects to every other — what "Live" already uses for its one-to-many case) scales
+poorly for *bidirectional* group video past roughly 4–5 participants, since each additional
+participant multiplies everyone else's upload bandwidth. Real N-way group calling needs an SFU
+(Selective Forwarding Unit), and there are three real ways to get one:
+
+1. **Self-hosted SFU** (e.g. mediasoup) on the same Oracle Cloud Always-Free VM already used for
+   coturn — stays inside this project's explicit free-tier-only stack, but is real infrastructure
+   work (a Node-based SFU process, room/participant lifecycle management).
+2. **Managed SFU service** (LiveKit Cloud, Twilio Video, Agora, Daily) — much less engineering effort,
+   but every option's free allowance is small, and adding a paid third-party dependency changes this
+   project's fully-free-tier stance deliberately rather than by default.
+3. **Cap group calls at a small mesh size** (e.g. 4 participants, reusing the exact mesh primitive
+   "Live" already proves out) — least effort, no new infra, but doesn't deliver a real group call at
+   normal group-chat sizes (groups already go up to 49 members).
+
+Leaning toward option 1 or 3 given this project's consistent free-tier-only history, but this is
+squarely the project owner's call. Detailed schema/backend/frontend planning follows once picked.
+
+### 📋 M16 — Multi-device / linked-device support (PLANNED — needs a decision before detailed design)
+
+**Why this is the biggest lift on either list:** everything else here is additive to the existing
+model. This one touches the core trust assumption of the E2E system — today a private key is
+generated once, encrypted with a password-derived key, and lives only in that browser's IndexedDB
+(`lib/crypto/keys.ts`). Linking a second device means that device must be able to decrypt every
+conversation the first device can, without the server ever learning a private key or content key in
+the clear.
+
+**Recommended approach (matches WhatsApp/Signal's linked-device model), reusing existing crypto
+primitives rather than inventing new ones:**
+
+1. The new device generates its own keypair locally (unchanged from today) and shows a QR code
+   encoding a short-lived pairing token + its public key.
+2. The primary (already-linked) device scans it (camera, or manual code entry as a fallback) and —
+   entirely client-side — re-wraps its cached, already-unwrapped copy of every conversation's content
+   key using the new device's public key. This is the *exact same* `wrapKeyFor` primitive
+   `new-chat-modal.tsx`/`group-info-modal.tsx` already use when adding a member to a conversation —
+   this milestone is really "add this device to every conversation you're already in," not new crypto.
+3. The re-wrapped keys upload via a new `POST /devices/:id/conversation-keys`, scoped to the pairing
+   session; the new device fetches and unwraps them with its own private key.
+4. **Open decision:** history access. Recommend v1 ships "new device sees new messages from linking
+   forward only" (matches most competitors' default) rather than also attempting a full history-sync
+   step, which is a meaningfully bigger feature in itself and worth scoping separately if wanted.
+
+Schema (additive): a `DeviceKeyGrant` table (`deviceId`, `conversationId`, `wrappedKey`) — mirrors
+`ConversationMember.wrappedKey`'s exact shape, just per-device instead of per-member.
+
+## Environment / provider state & pending manual setup
+
+Moved to **`PENDING_SETUP.md`** (2026-07-16) to keep this file focused on milestone history —
+that file has the full provider-by-provider status table and the details behind each pending
+item (TURN, VAPID, Brevo, TMDB, status music, app icons, legal copy, deploy accounts,
+Playwright, real-device testing). Update it, not this section, when any of those change.
+
+Deploying to production is now its own runbook: **`DEPLOYMENT.md`**.
 
 ## Working agreements
 
@@ -817,3 +1056,44 @@ convenient; tell the agent the resulting values/files when ready and it will wir
   All gates green (lint, format, typecheck, 131 API + 17 shared tests, both builds). Pending:
   user browser walkthrough of M10, plus M2–M9 overall — M10 is the last roadmap item beyond the
   original M0–M8 handoff scope.
+- **2026-07-15 (later)** — User gave browser-review feedback on the group-chat feature (not a
+  spec addendum): group member visibility + group photo, admin controls (add/remove members,
+  delete any message, transfer admin), a sole-admin-must-transfer-before-leaving rail, WhatsApp-
+  style sticky date separators, and a shared-media gallery for every conversation. Surveyed the
+  codebase first — found member-list data and add/remove-member admin-gating already existed
+  server-side with no frontend surface; everything else was genuinely missing. Planned and built
+  **M11** in the same session (one additive migration `m11_group_admin_media`; user confirmed the
+  media-gallery should do a full-history decrypt-and-index on first open rather than scope to
+  already-loaded messages like the existing in-chat search). 5 new API tests → 136 API tests, 17
+  shared tests total, all passing alongside the full pre-existing suite (no regressions). All
+  gates green (lint, format, typecheck, test, both builds). Pending: user browser walkthrough of
+  M11, plus M2–M10 overall still outstanding.
+- **2026-07-17** — User asked for the pending-setup and deployment information split into
+  their own files instead of living inside this one. Added `PENDING_SETUP.md` (provider-by-
+  provider status table + details, re-verified live against `.env` rather than copied stale —
+  confirmed `TURN_HOST`/`TURN_SHARED_SECRET`/`VAPID_*` are still present-but-empty placeholders
+  and `TMDB_API_KEY` isn't set at all) and `DEPLOYMENT.md` (a from-scratch Vercel/Render/
+  Supabase/Backblaze B2/UptimeRobot runbook, grounded in the actual `ci.yml`/`backup.yml`/
+  `env.ts`/`package.json` — not generic advice; notably documents that the API's `"build"`
+  script is typecheck-only and production runs TypeScript directly via `tsx`, and that Vercel's
+  build environment needs `VITE_*` vars set in its dashboard since `vite.config.ts`'s
+  `envDir: '../..'` only finds a root `.env` locally). Collapsed this file's old "Environment /
+  provider state" and "Pending manual setup" sections into a pointer to `PENDING_SETUP.md` so
+  there's one source of truth instead of two that can drift.
+- **2026-07-17 (later)** — User asked for a feature-suggestion + security/privacy review (a
+  two-agent codebase audit, not generic advice — one confirmed exactly which common
+  social/messaging features are genuinely missing vs already built, one audited the actual
+  security posture with file:line citations). User then asked for a plan covering all 18
+  items (17 unique — safety-number verification appeared on both the feature and security
+  lists) added to this file. Added planned milestones **M12–M16** above: M12 (security
+  hardening — helmet/CSP, signed-upload constraints, gating the dev-mode email-log fallback,
+  CSRF Origin check, per-user rate limiting, Dependabot/`pnpm audit`, forward secrecy
+  documented as an accepted limitation rather than built) is cheapest and a reasonable
+  first pick regardless of order; M13 (voice messages, message threads, disappearing
+  messages, safety-number verification); M14 (carousel posts, server-side link-preview
+  unfurling, nested comment replies, full-text post search); M15 (N-way group calls) and
+  M16 (multi-device/linked-device support) each flagged with an explicit open architecture
+  decision for the project owner (SFU choice for M15; history-sync scope for M16) rather
+  than guessed at, since getting either wrong would be costly to redo. Planning only — no
+  code written yet for M12–M16; M2–M11 browser walkthrough is still outstanding and
+  unaffected by this addition.

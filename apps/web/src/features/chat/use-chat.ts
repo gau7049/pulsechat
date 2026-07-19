@@ -21,7 +21,9 @@ import {
   type Page,
   type PresenceUpdatePayload,
   type StarredMessageDto,
+  type TransferAdminBody,
   type TypingEventPayload,
+  type UpdateGroupPhotoBody,
 } from '@pulsechat/shared';
 import { del, get, patch, post } from '../../lib/api';
 import { getSocket } from '../../lib/socket';
@@ -85,6 +87,28 @@ export function useLeaveConversation() {
   return useMutation({
     mutationFn: (input: { conversationId: string; userId: string }) =>
       del<{ ok: true }>(`/conversations/${input.conversationId}/members/${input.userId}`),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: conversationsKey }),
+  });
+}
+
+export function useUpdateGroupPhoto(conversationId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UpdateGroupPhotoBody) =>
+      patch<{ ok: true }>(`/conversations/${conversationId}/photo`, body),
+    onSuccess: (_data, body) => {
+      patchConversations(queryClient, (items) =>
+        items.map((c) => (c.id === conversationId ? { ...c, photoUrl: body.photoUrl } : c)),
+      );
+    },
+  });
+}
+
+export function useTransferAdmin(conversationId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: TransferAdminBody) =>
+      post<{ ok: true }>(`/conversations/${conversationId}/admin`, body),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: conversationsKey }),
   });
 }
@@ -437,7 +461,7 @@ export function useChatSocketBridge(userId: string | undefined): void {
     };
 
     const onNotification = (event: { type?: string }) => {
-      if (event.type === 'conversation_new') {
+      if (event.type === 'conversation_new' || event.type === 'conversation_updated') {
         void queryClient.invalidateQueries({ queryKey: conversationsKey });
       } else {
         void queryClient.invalidateQueries({ queryKey: ['social'] });

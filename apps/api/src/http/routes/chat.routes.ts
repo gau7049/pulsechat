@@ -9,6 +9,8 @@ import {
   messagesQuerySchema,
   paginationQuerySchema,
   reactionSchema,
+  transferAdminSchema,
+  updateGroupPhotoSchema,
   type AddMemberBody,
   type ConversationSettingsBody,
   type CreateConversationBody,
@@ -16,9 +18,11 @@ import {
   type EditMessageBody,
   type PaginationQuery,
   type ReactionBody,
+  type TransferAdminBody,
+  type UpdateGroupPhotoBody,
 } from '@pulsechat/shared';
 import * as chatService from '../../services/chat.service.js';
-import { signAttachmentUpload } from '../../services/cloudinary.service.js';
+import { signAttachmentUpload, signGroupPhotoUpload } from '../../services/cloudinary.service.js';
 import { apiLimiter } from '../middleware/rate-limit.js';
 import { requireAuth } from '../middleware/require-auth.js';
 import { param, validateBody, validateQuery } from '../middleware/validate.js';
@@ -69,6 +73,31 @@ chatRouter.patch(
     res.json({ ok: true });
   },
 );
+
+/** Group photo upload token — creator-or-admin gated before Cloudinary is ever signed. */
+chatRouter.post('/conversations/:id/photo-upload-token', async (req, res) => {
+  const conversationId = param(req, 'id');
+  await chatService.assertGroupPhotoPermission(req.auth!.sub, conversationId);
+  res.json(signGroupPhotoUpload(conversationId));
+});
+
+/** Persist the group photo once uploaded. */
+chatRouter.patch(
+  '/conversations/:id/photo',
+  validateBody(updateGroupPhotoSchema),
+  async (req, res) => {
+    const body = req.body as UpdateGroupPhotoBody;
+    await chatService.updateGroupPhoto(req.auth!.sub, param(req, 'id'), body.photoUrl);
+    res.json({ ok: true });
+  },
+);
+
+/** Transfer the admin role to another member — current admin only. */
+chatRouter.post('/conversations/:id/admin', validateBody(transferAdminSchema), async (req, res) => {
+  const body = req.body as TransferAdminBody;
+  await chatService.transferAdmin(req.auth!.sub, param(req, 'id'), body.toUserId);
+  res.json({ ok: true });
+});
 
 /** §14.6 starred messages view — registered before /messages/:id routes. */
 chatRouter.get('/messages/starred', validateQuery(paginationQuerySchema), async (req, res) => {

@@ -16,6 +16,8 @@ interface SignedUpload {
   publicId: string;
   signature: string;
   uploadUrl: string;
+  allowedFormats: string;
+  maxFileSize: number;
 }
 
 const VISIBILITIES: Array<{ value: Visibility; label: string; description: string }> = [
@@ -80,6 +82,8 @@ export function ProfileSection() {
       form.set('folder', signed.folder);
       form.set('public_id', signed.publicId);
       form.set('overwrite', 'true');
+      form.set('allowed_formats', signed.allowedFormats);
+      form.set('max_file_size', String(signed.maxFileSize));
 
       const upload = await fetch(signed.uploadUrl, { method: 'POST', body: form });
       if (!upload.ok) throw new Error('Upload failed');

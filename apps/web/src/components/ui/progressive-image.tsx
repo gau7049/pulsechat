@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type MouseEvent } from 'react';
 
 export interface ProgressiveImageProps {
   src: string;
@@ -8,6 +8,12 @@ export interface ProgressiveImageProps {
   className?: string;
   /** Extra classes on the <img> itself, e.g. a hover zoom transform. */
   imgClassName?: string;
+  /**
+   * Adds friction to the easy save-image paths (right-click, drag) and opts
+   * the image out of print — a deterrent only, never a security boundary.
+   * See `features/posts/post-protection.ts` for the full rationale.
+   */
+  protectedContent?: boolean;
 }
 
 /**
@@ -22,6 +28,7 @@ export function ProgressiveImage({
   aspectClassName = 'aspect-square',
   className = '',
   imgClassName = '',
+  protectedContent = false,
 }: ProgressiveImageProps) {
   const [loaded, setLoaded] = useState(false);
 
@@ -36,6 +43,13 @@ export function ProgressiveImage({
         loading="lazy"
         decoding="async"
         onLoad={() => setLoaded(true)}
+        {...(protectedContent
+          ? {
+              onContextMenu: (e: MouseEvent) => e.preventDefault(),
+              draggable: false,
+              'data-protected': 'true',
+            }
+          : {})}
         className={`size-full object-cover transition-opacity duration-300 ${
           loaded ? 'opacity-100' : 'opacity-0'
         } ${imgClassName}`}

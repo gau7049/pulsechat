@@ -56,6 +56,8 @@ export function toMessageDto(
     forwardedFromId: message.forwardedFromId,
     editedAt: message.editedAt?.toISOString() ?? null,
     deletedForEveryoneAt: message.deletedForEveryoneAt?.toISOString() ?? null,
+    /** Distinguishes a group admin's removal from the sender's own delete. */
+    deletedByAdmin: message.deletedBy !== null && message.deletedBy !== message.senderId,
     createdAt: message.createdAt.toISOString(),
     reactions: (withMeta.reactions ?? []).map((r) => ({ userId: r.userId, emoji: r.emoji })),
     starred: (withMeta.stars ?? []).length > 0,
@@ -99,6 +101,8 @@ async function toConversationDto(
     id: conversation.id,
     type: conversation.type,
     name: conversation.name,
+    photoUrl: conversation.photoUrl,
+    createdById: conversation.createdById,
     createdAt: conversation.createdAt.toISOString(),
     members: await toMemberDtos(viewerId, conversation.members),
     myWrappedKey: me.wrappedKey,
@@ -275,12 +279,96 @@ export async function removeMember(
   if (targetUserId !== actorId && actor.role !== 'admin') {
     throw new AppError('FORBIDDEN', 'Only the group admin can remove members');
   }
+  // A group must always have an active admin — the admin has to hand off the
+  // role before they're allowed to leave.
+  if (targetUserId === actorId && actor.role === 'admin') {
+    throw new AppError(
+      'CONFLICT',
+      'Transfer admin role to another member before leaving the group',
+    );
+  }
   const removed = await chat.removeMember(conversationId, targetUserId);
   if (!removed) throw new AppError('NOT_FOUND', 'Not a member of this group');
   logger.info(
     { event: 'chat.member_removed', conversationId, targetUserId, actorId },
     'group member removed',
   );
+}
+
+/**
+ * Shared creator-or-admin check for anything that touches the group photo
+ * (both the upload-token route and the persisting PATCH need it).
+ */
+export async function assertGroupPhotoPermission(
+  actorId: string,
+  conversationId: string,
+): Promise<void> {
+  const conversation = await chat.getConversation(conversationId);
+  const actor = conversation?.members.find((m) => m.userId === actorId);
+  if (!conversation || !actor) throw new AppError('NOT_FOUND', 'Conversation not found');
+  if (conversation.type !== 'group') {
+    throw new AppError('VALIDATION_FAILED', 'Only groups have a photo');
+  }
+  if (actor.role !== 'admin' && conversation.createdById !== actorId) {
+    throw new AppError('FORBIDDEN', 'Only the group creator or admin can change the photo');
+  }
+}
+
+/** Group photo (creator-or-admin gated — the creator keeps this for life). */
+export async function updateGroupPhoto(
+  actorId: string,
+  conversationId: string,
+  photoUrl: string,
+): Promise<void> {
+  await assertGroupPhotoPermission(actorId, conversationId);
+  const conversation = await chat.getConversation(conversationId);
+  if (!conversation) throw new AppError('NOT_FOUND', 'Conversation not found');
+  await chat.updateGroupPhoto(conversationId, photoUrl);
+  notifyConversationUpdated(conversation);
+  logger.info(
+    { event: 'chat.group_photo_updated', conversationId, actorId },
+    'group photo updated',
+  );
+}
+
+/** Hands the admin role to another member; the old admin becomes a regular member. */
+export async function transferAdmin(
+  actorId: string,
+  conversationId: string,
+  toUserId: string,
+): Promise<void> {
+  const conversation = await chat.getConversation(conversationId);
+  const actor = conversation?.members.find((m) => m.userId === actorId);
+  if (!conversation || !actor) throw new AppError('NOT_FOUND', 'Conversation not found');
+  if (conversation.type !== 'group') {
+    throw new AppError('VALIDATION_FAILED', 'Only groups have an admin role');
+  }
+  if (actor.role !== 'admin') {
+    throw new AppError('FORBIDDEN', 'Only the current admin can transfer the role');
+  }
+  const target = conversation.members.find((m) => m.userId === toUserId);
+  if (!target) throw new AppError('NOT_FOUND', 'Not a member of this group');
+  if (target.userId === actorId) {
+    throw new AppError('VALIDATION_FAILED', 'You are already the admin');
+  }
+  await chat.transferAdminRole(conversationId, actorId, toUserId);
+  notifyConversationUpdated(conversation);
+  logger.info(
+    { event: 'chat.admin_transferred', conversationId, fromUserId: actorId, toUserId },
+    'group admin transferred',
+  );
+}
+
+/** Pings every member to refetch the conversation (photo/role changes). */
+function notifyConversationUpdated(conversation: ConversationWithMembers): void {
+  const io = getIo();
+  for (const member of conversation.members) {
+    io?.to(`user:${member.userId}`).emit(SERVER_EVENTS.NOTIFICATION_NEW, {
+      type: 'conversation_updated',
+      payload: { conversationId: conversation.id },
+      createdAt: new Date().toISOString(),
+    });
+  }
 }
 
 // ── History ──────────────────────────────────────────────────────────────────
@@ -594,11 +682,13 @@ export async function deleteMessage(
     await chat.hideMessage(messageId, userId);
     return;
   }
-  if (message.senderId !== userId) {
+  const actor = conversation.members.find((m) => m.userId === userId);
+  const isGroupAdmin = conversation.type === 'group' && actor?.role === 'admin';
+  if (message.senderId !== userId && !isGroupAdmin) {
     throw new AppError('FORBIDDEN', 'Only the sender can delete for everyone');
   }
   if (!message.deletedForEveryoneAt) {
-    await chat.tombstoneMessage(messageId);
+    await chat.tombstoneMessage(messageId, message.senderId !== userId ? userId : undefined);
     fanOut(conversation, SERVER_EVENTS.MESSAGE_DELETED, {
       conversationId: conversation.id,
       messageId,

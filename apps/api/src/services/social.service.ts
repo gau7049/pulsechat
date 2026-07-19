@@ -339,13 +339,19 @@ export async function removeFriend(userId: string, otherUserId: string): Promise
 
 // ── Suggestions (§10.1) ──────────────────────────────────────────────────────
 
-/** "People you may know": friends of friends ranked by shared-friend count. */
+/**
+ * "People you may know": every active user who isn't already a friend
+ * (excluding blocked/pending too — those are already "in progress" or
+ * off-limits). Friends-of-friends are ranked first via shared-friend count
+ * when that signal exists; the rest of the quota is filled with other
+ * non-friend users so the section is never empty for an account with few or
+ * no friends yet.
+ */
 export async function suggestions(userId: string): Promise<SuggestionDto[]> {
   const friendIds = await social.friendIds(userId);
-  if (friendIds.length === 0) return [];
 
   const [rows, blockedIds, pendingIds] = await Promise.all([
-    social.friendshipsOfUsers(friendIds),
+    friendIds.length > 0 ? social.friendshipsOfUsers(friendIds) : Promise.resolve([]),
     social.blockedEitherWayIds(userId),
     social.pendingUserIds(userId),
   ]);
@@ -362,14 +368,26 @@ export async function suggestions(userId: string): Promise<SuggestionDto[]> {
   }
 
   const ranked = [...counts.entries()].sort((x, y) => y[1] - x[1]).slice(0, SUGGESTION_LIMIT);
+
+  // Fill any remaining quota with other non-friend users (no mutual-friend
+  // signal — e.g. a fresh account, or one whose friends-of-friends are used up).
+  const remaining = SUGGESTION_LIMIT - ranked.length;
+  const filler =
+    remaining > 0
+      ? await users.listActiveUsersExcluding([...excluded, ...ranked.map(([id]) => id)], remaining)
+      : [];
+
   const candidates = await users.findManyByIds(ranked.map(([id]) => id));
   const byId = new Map(candidates.map((c) => [c.id, c]));
-  return ranked
-    .filter(([id]) => byId.has(id))
-    .map(([id, mutualCount]) => ({
-      user: toUserSummaryDto(byId.get(id)!),
-      mutualCount,
-    }));
+  return [
+    ...ranked
+      .filter(([id]) => byId.has(id))
+      .map(([id, mutualCount]) => ({
+        user: toUserSummaryDto(byId.get(id)!),
+        mutualCount,
+      })),
+    ...filler.map((u) => ({ user: toUserSummaryDto(u), mutualCount: 0 })),
+  ];
 }
 
 /**

@@ -73,6 +73,7 @@ function toPostDtoFrom(post: PostWithHashtags, likedByMe: boolean, savedByMe: bo
     mediaUrl: post.mediaUrl,
     caption: post.caption,
     audience: post.audience,
+    isPublic: post.author.visibility === 'public' && post.audience === 'everyone',
     hashtags: post.hashtags.map((h) => h.tag),
     taggedUsers: post.tags.map((t) => toUserSummaryDto(t.taggedUser)),
     likeCount: post.likeCount,

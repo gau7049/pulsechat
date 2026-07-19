@@ -72,6 +72,23 @@ export function findManyByIds(ids: string[]): Promise<UserWithPrivacy[]> {
   });
 }
 
+/**
+ * "People you may know" filler (§10.1): any active account not already
+ * excluded, newest signups first — used once the friends-of-friends signal
+ * runs out (or doesn't exist yet, e.g. a brand-new account with no friends).
+ */
+export function listActiveUsersExcluding(
+  excludeIds: string[],
+  limit: number,
+): Promise<UserWithPrivacy[]> {
+  return prisma.user.findMany({
+    where: { status: 'active', id: { notIn: excludeIds } },
+    include: { privacy: true },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+  });
+}
+
 export function countPosts(authorId: string): Promise<number> {
   return prisma.post.count({ where: { authorId } });
 }

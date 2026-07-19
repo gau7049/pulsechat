@@ -224,6 +224,30 @@ describe('token refresh & logout', () => {
     const afterLogout = await request(app).post('/auth/refresh').set('Cookie', cookie);
     expect(afterLogout.status).toBe(401);
   });
+
+  it('rejects a cross-origin refresh/logout, allows a same-origin one (§CSRF, M12)', async () => {
+    const { res } = await registerUser();
+    const cookie = refreshCookie(res);
+    const token = res.body.accessToken as string;
+
+    const crossOrigin = await request(app)
+      .post('/auth/refresh')
+      .set('Cookie', cookie)
+      .set('Origin', 'https://evil.example.com');
+    expect(crossOrigin.status).toBe(403);
+
+    const sameOrigin = await request(app)
+      .post('/auth/refresh')
+      .set('Cookie', cookie)
+      .set('Origin', 'http://localhost:8000');
+    expect(sameOrigin.status).toBe(200);
+
+    const crossOriginLogout = await request(app)
+      .post('/auth/logout')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Origin', 'https://evil.example.com');
+    expect(crossOriginLogout.status).toBe(403);
+  });
 });
 
 describe('email verification + magic link', () => {

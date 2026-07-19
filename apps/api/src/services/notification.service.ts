@@ -72,11 +72,12 @@ function pushCopy(
 
 /**
  * Some notification types are naturally repeatable by the same actor on the
- * same target (like → unlike → like) — while the first one is still unread,
- * a repeat shouldn't stack a second identical "X liked your post" row. This
- * returns a matcher for the existing unread row to refresh instead of
- * duplicating, or `null` for types that don't need it (a fresh event should
- * always be its own row).
+ * same target (like → unlike → like) — a repeat should never stack a second
+ * identical "X liked your post" row, whether or not the recipient has
+ * already read the first one (matching Instagram: re-liking after unliking
+ * doesn't create a new notification). This returns a matcher for the
+ * existing row to refresh instead of duplicating, or `null` for types that
+ * don't need it (a fresh event should always be its own row).
  */
 function dedupeMatcher(
   type: NotificationType,
@@ -100,21 +101,23 @@ function dedupeMatcher(
   return null;
 }
 
-async function findUnreadDuplicate(
+async function findDuplicate(
   userId: string,
   type: NotificationType,
   matches: (payload: Record<string, unknown>) => boolean,
-): Promise<{ id: string } | null> {
-  // Bounded scan of this user's most recent unread rows of this type —
-  // avoids relying on provider-specific JSON-path querying for a small,
-  // naturally-recent set.
+): Promise<{ id: string; wasUnread: boolean } | null> {
+  // Bounded scan of this user's most recent rows of this type (read or not)
+  // — avoids relying on provider-specific JSON-path querying for a small,
+  // naturally-recent set. Not scoped to unread: a like the recipient already
+  // saw and read must still dedupe against a later unlike→relike, or the
+  // repeat would wrongly stack a second row.
   const candidates = await prisma.notification.findMany({
-    where: { userId, type, readAt: null },
+    where: { userId, type },
     orderBy: { createdAt: 'desc' },
     take: 20,
   });
   const hit = candidates.find((c) => matches(c.payloadJson as Record<string, unknown>));
-  return hit ? { id: hit.id } : null;
+  return hit ? { id: hit.id, wasUnread: hit.readAt === null } : null;
 }
 
 export async function notify(
@@ -124,11 +127,17 @@ export async function notify(
 ): Promise<void> {
   try {
     const matcher = dedupeMatcher(type, payload);
-    const duplicate = matcher ? await findUnreadDuplicate(userId, type, matcher) : null;
+    const duplicate = matcher ? await findDuplicate(userId, type, matcher) : null;
     const row = duplicate
       ? await prisma.notification.update({
           where: { id: duplicate.id },
-          data: { payloadJson: payload as unknown as Prisma.InputJsonValue, createdAt: new Date() },
+          data: {
+            payloadJson: payload as unknown as Prisma.InputJsonValue,
+            createdAt: new Date(),
+            // A relike after the recipient already read the original is a
+            // genuinely new-to-them event — resurface it as unread.
+            readAt: null,
+          },
         })
       : await prisma.notification.create({
           data: { userId, type, payloadJson: payload as unknown as Prisma.InputJsonValue },
@@ -143,9 +152,11 @@ export async function notify(
       { event: 'notification.sent', type, userId, deduped: Boolean(duplicate) },
       'notification sent',
     );
-    // A refreshed duplicate is still unread on the recipient's device from
-    // the first time — don't push-alert them a second time for it.
-    if (!duplicate) await sendPush(userId, { ...pushCopy(type, payload), tag: type, url: '/' });
+    // Still unread from the first time → the recipient already has a pending
+    // alert for this, don't push again. Was already read → this is new to
+    // them again, so it does deserve a fresh push.
+    if (!duplicate?.wasUnread)
+      await sendPush(userId, { ...pushCopy(type, payload), tag: type, url: '/' });
   } catch (error) {
     // Notifications are best-effort; never fail the action that caused one.
     logger.error({ event: 'notification.failed', type, userId, err: error }, 'notify failed');

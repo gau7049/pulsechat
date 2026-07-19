@@ -20,7 +20,7 @@ export function EmptyState({ icon, title, description, action }: EmptyStateProps
           {icon}
         </div>
       )}
-      <h2 className="text-lg font-semibold text-fg">{title}</h2>
+      <h2 className="text-lg font-bold text-fg">{title}</h2>
       {description && <p className="max-w-sm text-sm text-fg-muted">{description}</p>}
       {action && <div className="mt-2">{action}</div>}
     </div>

@@ -1,7 +1,11 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 
-/** Shared centered card layout for every auth screen. */
+/**
+ * Shared layout for every auth screen. Desktop (lg+) renders the wireframe
+ * split panel (frames L1/L2): dark brand pane left, form right. Mobile keeps
+ * the single-column layout of frames A1–A4.
+ */
 export function AuthCard({
   title,
   subtitle,
@@ -14,22 +18,30 @@ export function AuthCard({
   footer?: ReactNode;
 }) {
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center bg-surface px-4 py-10">
-      <Link to="/" className="mb-6 flex items-center gap-2" aria-label="PulseChat home">
-        <span
-          aria-hidden
-          className="flex size-10 items-center justify-center rounded-2xl bg-accent text-lg font-bold text-on-accent"
-        >
-          P
-        </span>
-        <span className="text-xl font-bold text-fg">PulseChat</span>
-      </Link>
-      <section className="w-full max-w-sm rounded-2xl border border-border bg-surface-raised p-6 shadow-sm">
-        <h1 className="text-xl font-bold text-fg">{title}</h1>
-        {subtitle && <p className="mt-1 text-sm text-fg-muted">{subtitle}</p>}
-        <div className="mt-5">{children}</div>
+    <main className="flex min-h-dvh bg-surface">
+      {/* Brand pane (frame L1): logo mark, tagline, privacy-first subline. */}
+      <section className="brand-gradient hidden w-[42%] shrink-0 flex-col justify-center p-14 text-white lg:flex">
+        <span aria-hidden className="logo-gradient mb-6 block size-13 rounded-2xl" />
+        <h2 className="mb-3 text-[32px] leading-tight font-extrabold">Chat with real presence.</h2>
+        <p className="max-w-sm text-sm leading-relaxed text-white/75">
+          Friends-first messaging, status, live streams, and a feed — private by design.
+        </p>
       </section>
-      {footer && <div className="mt-4 text-sm text-fg-muted">{footer}</div>}
+
+      <div className="flex min-w-0 flex-1 flex-col items-center justify-center px-6 py-10">
+        <Link to="/" className="mb-6 flex items-center gap-2 lg:hidden" aria-label="PulseChat home">
+          <span aria-hidden className="logo-gradient block size-11 rounded-2xl" />
+          <span className="text-xl font-extrabold tracking-tight text-fg">PulseChat</span>
+        </Link>
+        <section className="w-full max-w-sm">
+          <h1 className="text-2xl font-extrabold text-fg">{title}</h1>
+          {subtitle && <p className="mt-1.5 text-sm font-medium text-fg-muted">{subtitle}</p>}
+          <div className="mt-6">{children}</div>
+          {footer && (
+            <div className="mt-5 text-center text-sm font-medium text-fg-muted">{footer}</div>
+          )}
+        </section>
+      </div>
     </main>
   );
 }

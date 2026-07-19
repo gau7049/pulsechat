@@ -1,6 +1,7 @@
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import express, { type Express } from 'express';
+import helmet from 'helmet';
 import { env } from '../config/env.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { notFound } from './middleware/not-found.js';
@@ -32,6 +33,17 @@ export function createApp(): Express {
 
   app.disable('x-powered-by');
   app.use(requestContext);
+  app.use(
+    helmet({
+      // This server only ever returns JSON, never HTML — the default CSP is
+      // harmless defense-in-depth, not something any page here relies on.
+      // CORP/COEP default to same-origin, which would break the whole point
+      // of this API (a cross-origin backend the Vercel-hosted web app calls);
+      // relax both to the explicit cross-origin CORS contract below instead.
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      crossOriginEmbedderPolicy: false,
+    }),
+  );
   app.use(cors({ origin: env.APP_ORIGIN, credentials: true }));
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());

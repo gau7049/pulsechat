@@ -17,6 +17,7 @@ import { Input } from '../../components/ui/input';
 import { Modal } from '../../components/ui/modal';
 import { SkeletonRow } from '../../components/ui/skeleton';
 import { useToast } from '../../components/ui/toast';
+import { ApiError } from '../../lib/api';
 import { getSocket } from '../../lib/socket';
 import { useAuth } from '../auth/auth-context';
 import { useStartCall } from '../calls/use-calls';
@@ -24,6 +25,9 @@ import { ImageAnnotator } from '../annotate/image-annotator';
 import { uploadAttachment, type AttachmentKind } from './attachments';
 import { getTypingSnapshot, setActiveConversation, typingEmitter } from './chat-live-store';
 import { conversationTitle, lastSeenLabel, otherMember } from './conversation-utils';
+import { groupByDay } from './date-utils';
+import { GroupInfoModal } from './group-info-modal';
+import { MediaGalleryModal } from './media-gallery-modal';
 import { MessageBubble, type BubbleActions } from './message-bubble';
 import { parseEnvelope, serializeEnvelope, type MessageEnvelope } from './message-envelope';
 import { STICKERS } from './stickers';
@@ -53,6 +57,15 @@ type ComposerMode =
   | { kind: 'reply'; target: MessageDto }
   | { kind: 'edit'; target: MessageDto; originalText: string };
 
+/** A history message or an in-flight outbox entry, ready for day-grouping. */
+interface TimelineEntry {
+  key: string;
+  createdAt: string;
+  message: MessageDto;
+  localState?: 'pending' | 'failed';
+  onRetry?: () => void;
+}
+
 export function ChatWindow({ conversation }: { conversation: ConversationDto }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -65,6 +78,8 @@ export function ChatWindow({ conversation }: { conversation: ConversationDto }) 
   const [forwarding, setForwarding] = useState<MessageDto | null>(null);
   const [searching, setSearching] = useState(false);
   const [wallpaperVersion, setWallpaperVersion] = useState(0);
+  const [groupInfoOpen, setGroupInfoOpen] = useState(false);
+  const [mediaGalleryOpen, setMediaGalleryOpen] = useState(false);
 
   const messages = useMemo(() => {
     const items = messagesQuery.data?.pages.flatMap((page) => page.items) ?? [];
@@ -73,6 +88,26 @@ export function ChatWindow({ conversation }: { conversation: ConversationDto }) 
 
   const messagesById = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
   const topSequence = messages.at(-1)?.sequence ?? 0;
+
+  // Merge history + in-flight outbox entries into one chronological timeline,
+  // then bucket by calendar day for the sticky date separators.
+  const timeline = useMemo(() => {
+    const fromMessages: TimelineEntry[] = messages.map((message) => ({
+      key: message.id,
+      createdAt: message.createdAt,
+      message,
+    }));
+    const fromOutbox: TimelineEntry[] = outboxEntries.map((entry) => ({
+      key: entry.clientUuid,
+      createdAt: entry.createdAt,
+      message: outboxEntryAsMessage(entry, user?.id ?? ''),
+      localState: entry.status,
+      onRetry: entry.status === 'failed' ? () => retry(entry.clientUuid) : undefined,
+    }));
+    return [...fromMessages, ...fromOutbox].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }, [messages, outboxEntries, retry, user?.id]);
+
+  const dayGroups = useMemo(() => groupByDay(timeline), [timeline]);
 
   useEffect(() => {
     setActiveConversation(conversation.id);
@@ -152,6 +187,8 @@ export function ChatWindow({ conversation }: { conversation: ConversationDto }) 
         myId={user.id}
         onToggleSearch={() => setSearching((s) => !s)}
         onWallpaperChanged={() => setWallpaperVersion((v) => v + 1)}
+        onOpenGroupInfo={() => setGroupInfoOpen(true)}
+        onOpenMedia={() => setMediaGalleryOpen(true)}
       />
 
       {searching && (
@@ -201,25 +238,30 @@ export function ChatWindow({ conversation }: { conversation: ConversationDto }) 
             description="Messages are end-to-end protected — the server only ever sees ciphertext."
           />
         )}
-        {messages.map((message) => (
-          <MessageBubble
-            key={message.id}
-            userId={user.id}
-            conversation={conversation}
-            message={message}
-            repliedMessage={message.replyToId ? messagesById.get(message.replyToId) : undefined}
-            actions={bubbleActions}
-          />
-        ))}
-        {outboxEntries.map((entry) => (
-          <MessageBubble
-            key={entry.clientUuid}
-            userId={user.id}
-            conversation={conversation}
-            message={outboxEntryAsMessage(entry, user.id)}
-            localState={entry.status}
-            onRetry={entry.status === 'failed' ? () => retry(entry.clientUuid) : undefined}
-          />
+        {dayGroups.map((group) => (
+          <div key={group.label}>
+            <div className="sticky top-0 z-10 flex justify-center py-1.5">
+              <span className="rounded-full bg-surface-raised/90 px-3 py-1 text-[11px] font-semibold text-fg-muted shadow-sm backdrop-blur">
+                {group.label}
+              </span>
+            </div>
+            <div className="space-y-2">
+              {group.items.map((item) => (
+                <MessageBubble
+                  key={item.key}
+                  userId={user.id}
+                  conversation={conversation}
+                  message={item.message}
+                  repliedMessage={
+                    item.message.replyToId ? messagesById.get(item.message.replyToId) : undefined
+                  }
+                  localState={item.localState}
+                  onRetry={item.onRetry}
+                  actions={bubbleActions}
+                />
+              ))}
+            </div>
+          </div>
         ))}
         <TypingLine conversationId={conversation.id} />
       </div>
@@ -238,6 +280,23 @@ export function ChatWindow({ conversation }: { conversation: ConversationDto }) 
           source={forwarding}
           sourceConversation={conversation}
           onClose={() => setForwarding(null)}
+        />
+      )}
+
+      {groupInfoOpen && conversation.type === 'group' && (
+        <GroupInfoModal
+          conversation={conversation}
+          myId={user.id}
+          onClose={() => setGroupInfoOpen(false)}
+        />
+      )}
+
+      {mediaGalleryOpen && (
+        <MediaGalleryModal
+          conversation={conversation}
+          userId={user.id}
+          onJump={(id) => void scrollToMessage(id)}
+          onClose={() => setMediaGalleryOpen(false)}
         />
       )}
     </section>
@@ -268,6 +327,7 @@ function outboxEntryAsMessage(
     forwardedFromId: entry.forwardedFromId ?? null,
     editedAt: null,
     deletedForEveryoneAt: null,
+    deletedByAdmin: false,
     createdAt: entry.createdAt,
     reactions: [],
     starred: false,
@@ -281,11 +341,15 @@ function ChatHeader({
   myId,
   onToggleSearch,
   onWallpaperChanged,
+  onOpenGroupInfo,
+  onOpenMedia,
 }: {
   conversation: ConversationDto;
   myId: string;
   onToggleSearch: () => void;
   onWallpaperChanged: () => void;
+  onOpenGroupInfo: () => void;
+  onOpenMedia: () => void;
 }) {
   const other = otherMember(conversation, myId);
   const subtitle =
@@ -317,15 +381,19 @@ function ChatHeader({
           </span>
         </Link>
       ) : (
-        <span className="flex min-w-0 flex-1 items-center gap-3">
-          <Avatar name={conversation.name ?? 'Group'} size="sm" />
+        <button
+          type="button"
+          onClick={onOpenGroupInfo}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        >
+          <Avatar name={conversation.name ?? 'Group'} src={conversation.photoUrl} size="sm" />
           <span className="min-w-0">
             <span className="block truncate text-sm font-semibold text-fg">
               {conversation.name}
             </span>
             <span className="block truncate text-xs text-fg-muted">{subtitle}</span>
           </span>
-        </span>
+        </button>
       )}
 
       {conversation.type === 'direct' && other && (
@@ -363,6 +431,8 @@ function ChatHeader({
         conversation={conversation}
         myId={myId}
         onWallpaperChanged={onWallpaperChanged}
+        onOpenGroupInfo={onOpenGroupInfo}
+        onOpenMedia={onOpenMedia}
       />
     </header>
   );
@@ -372,10 +442,14 @@ function ConversationMenu({
   conversation,
   myId,
   onWallpaperChanged,
+  onOpenGroupInfo,
+  onOpenMedia,
 }: {
   conversation: ConversationDto;
   myId: string;
   onWallpaperChanged: () => void;
+  onOpenGroupInfo: () => void;
+  onOpenMedia: () => void;
 }) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
@@ -434,18 +508,40 @@ function ConversationMenu({
                 setOpen(false);
               }}
             />
+            <HeaderMenuItem
+              label="Media, links & docs"
+              onClick={() => {
+                onOpenMedia();
+                setOpen(false);
+              }}
+            />
             {conversation.type === 'group' && (
-              <HeaderMenuItem
-                label="Leave group"
-                danger
-                onClick={() => {
-                  leave.mutate(
-                    { conversationId: conversation.id, userId: myId },
-                    { onError: () => toast('Could not leave the group', { kind: 'error' }) },
-                  );
-                  setOpen(false);
-                }}
-              />
+              <>
+                <HeaderMenuItem
+                  label="Group info"
+                  onClick={() => {
+                    onOpenGroupInfo();
+                    setOpen(false);
+                  }}
+                />
+                <HeaderMenuItem
+                  label="Leave group"
+                  danger
+                  onClick={() => {
+                    leave.mutate(
+                      { conversationId: conversation.id, userId: myId },
+                      {
+                        onError: (error) =>
+                          toast(
+                            error instanceof ApiError ? error.message : 'Could not leave the group',
+                            { kind: 'error' },
+                          ),
+                      },
+                    );
+                    setOpen(false);
+                  }}
+                />
+              </>
             )}
           </div>
         </>

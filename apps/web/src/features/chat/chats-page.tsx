@@ -27,7 +27,9 @@ export function ChatsPage() {
   const active = conversations.find((c) => c.id === activeId) ?? null;
 
   return (
-    <main className="mx-auto flex h-[calc(100dvh-3.5rem)] w-full max-w-6xl">
+    // Full-height surface: mobile subtracts top bar + bottom tab bar; desktop
+    // runs the sidebar layout with no top chrome (frames F1/F5).
+    <main className="mx-auto flex h-[calc(100dvh-8.25rem)] w-full max-w-6xl lg:h-dvh">
       <aside
         className={`w-full flex-col border-r border-border md:flex md:w-80 lg:w-96 ${
           activeId ? 'hidden' : 'flex'
@@ -35,7 +37,7 @@ export function ChatsPage() {
         aria-label="Chat list"
       >
         <div className="flex items-center justify-between gap-2 px-4 py-3">
-          <h1 className="text-xl font-bold text-fg">Chats</h1>
+          <h1 className="text-xl font-extrabold text-fg">Messages</h1>
           <span className="flex items-center gap-1">
             <Link
               to="/chats/starred"

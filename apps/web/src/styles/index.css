@@ -8,6 +8,8 @@
    Semantic variables are defined per theme below, then exposed to Tailwind as
    `bg-surface`, `text-fg-muted`, `bg-accent`, … via @theme inline. */
 @theme inline {
+  /* Wireframe type: Manrope everywhere (PulseChat Wireframes.dc.html). */
+  --font-sans: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
   --color-surface-sunken: var(--surface-sunken);
@@ -23,16 +25,17 @@
   --color-warning: var(--warning);
 }
 
-/* Light theme (default) */
+/* Light theme (default) — values from PulseChat Wireframes.dc.html palette:
+   warm near-white surface (hue 90), ink text (hue 264), coral for live/alerts. */
 :root {
-  --surface: oklch(0.985 0.002 250);
+  --surface: oklch(0.985 0.004 90);
   --surface-raised: oklch(1 0 0);
-  --surface-sunken: oklch(0.955 0.004 250);
-  --border: oklch(0.9 0.008 250);
-  --fg: oklch(0.22 0.02 255);
-  --fg-muted: oklch(0.5 0.02 255);
-  --danger: oklch(0.55 0.2 25);
-  --success: oklch(0.55 0.15 155);
+  --surface-sunken: oklch(0.96 0.004 90);
+  --border: oklch(0.9 0.006 90);
+  --fg: oklch(0.22 0.02 264);
+  --fg-muted: oklch(0.5 0.015 264);
+  --danger: oklch(0.6 0.19 25);
+  --success: oklch(0.6 0.15 145);
   --warning: oklch(0.65 0.15 75);
   --on-accent: oklch(0.99 0 0);
   color-scheme: light;
@@ -40,14 +43,14 @@
 
 /* Dark theme — fully restyled, not background-swapped (Build Instructions §7) */
 .dark {
-  --surface: oklch(0.19 0.015 255);
-  --surface-raised: oklch(0.24 0.015 255);
-  --surface-sunken: oklch(0.15 0.015 255);
-  --border: oklch(0.32 0.015 255);
-  --fg: oklch(0.93 0.005 250);
-  --fg-muted: oklch(0.68 0.01 250);
+  --surface: oklch(0.16 0.012 264);
+  --surface-raised: oklch(0.21 0.012 264);
+  --surface-sunken: oklch(0.13 0.012 264);
+  --border: oklch(0.28 0.012 264);
+  --fg: oklch(0.93 0.005 264);
+  --fg-muted: oklch(0.68 0.01 264);
   --danger: oklch(0.68 0.19 25);
-  --success: oklch(0.72 0.14 155);
+  --success: oklch(0.72 0.14 145);
   --warning: oklch(0.78 0.14 80);
   --on-accent: oklch(0.99 0 0);
   color-scheme: dark;
@@ -57,7 +60,8 @@
    ThemeProvider stamps data-accent on <html>; AA contrast holds in both modes. */
 :root,
 [data-accent='pulse'] {
-  --accent-hue: 265;
+  /* Wireframe indigo: oklch(0.58 0.19 291). */
+  --accent-hue: 291;
 }
 [data-accent='ocean'] {
   --accent-hue: 240;
@@ -73,9 +77,9 @@
 }
 
 :root {
-  --accent: oklch(0.54 0.19 var(--accent-hue));
-  --accent-strong: oklch(0.47 0.21 var(--accent-hue));
-  --accent-soft: oklch(0.94 0.04 var(--accent-hue));
+  --accent: oklch(0.58 0.19 var(--accent-hue));
+  --accent-strong: oklch(0.5 0.2 var(--accent-hue));
+  --accent-soft: oklch(0.94 0.03 var(--accent-hue));
 }
 .dark {
   --accent: oklch(0.72 0.16 var(--accent-hue));
@@ -87,6 +91,19 @@
 /* ── Base ── */
 body {
   @apply bg-surface text-fg antialiased;
+}
+
+/* Brand gradients from the wireframes: the dark auth pane (frames L1/L2) and
+   the indigo→coral logo mark. Accent-hue aware so accent themes carry through. */
+.brand-gradient {
+  background: linear-gradient(160deg, oklch(0.3 0.1 var(--accent-hue)), oklch(0.24 0.08 260));
+}
+.logo-gradient {
+  background: linear-gradient(135deg, oklch(0.6 0.2 var(--accent-hue)), oklch(0.68 0.19 25));
+}
+/* Status/live dark backdrop (frames G1/K1/N17). */
+.viewer-gradient {
+  background: linear-gradient(160deg, oklch(0.3 0.08 var(--accent-hue)), oklch(0.22 0.06 260));
 }
 
 /* Visible focus for keyboard users, everywhere (Build Instructions §7). */
@@ -121,6 +138,17 @@ body {
 }
 .animate-heart-pop {
   animation: heart-pop 900ms ease-out forwards;
+}
+
+/*
+ * Content protection deterrent — non-public post images are excluded from
+ * print output. A deterrent only (browsers can't be made to truly block
+ * screenshots/recording/printing); see features/posts/post-protection.ts.
+ */
+@media print {
+  img[data-protected='true'] {
+    visibility: hidden;
+  }
 }
 
 /* Respect prefers-reduced-motion globally. */
