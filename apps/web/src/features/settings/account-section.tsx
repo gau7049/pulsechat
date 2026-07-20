@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ApiError, get, post } from '../../lib/api';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -118,9 +119,26 @@ function ExportBlock() {
 export function AccountSection() {
   const { logout } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   return (
     <div className="flex flex-col gap-8">
+      <section aria-labelledby="acc-logout">
+        <h3 id="acc-logout" className="mb-1 text-sm font-semibold text-fg">
+          Log out
+        </h3>
+        <p className="text-sm text-fg-muted">Sign out of PulseChat on this device.</p>
+        <Button
+          variant="secondary"
+          size="sm"
+          className="mt-3"
+          onClick={() => {
+            void logout().then(() => navigate('/login'));
+          }}
+        >
+          Log out
+        </Button>
+      </section>
       <section aria-labelledby="acc-export">
         <h3 id="acc-export" className="mb-1 text-sm font-semibold text-fg">
           Data export
