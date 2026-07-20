@@ -5,6 +5,7 @@ import { Button } from '../../components/ui/button';
 import { EmptyState } from '../../components/ui/empty-state';
 import { Input } from '../../components/ui/input';
 import { SkeletonRow } from '../../components/ui/skeleton';
+import { useMobileViewportHeightPx } from '../../lib/use-mobile-viewport-height';
 import { useAuth } from '../auth/auth-context';
 import { useKeyStatus } from './chat-keys';
 import { ChatWindow } from './chat-window';
@@ -22,6 +23,10 @@ export function ChatsPage() {
   const conversationsQuery = useConversations();
   const { status: keyStatus, unlock, recover } = useKeyStatus(user?.id);
   const [showNewChat, setShowNewChat] = useState(false);
+  // Tracks the real, keyboard-shrunk visual viewport on mobile (dvh doesn't
+  // react to the on-screen keyboard) so the composer never ends up hidden
+  // behind it — see the hook's own comment for why that matters.
+  const mobileViewportPx = useMobileViewportHeightPx();
 
   if (!user) return null;
   const conversations = conversationsQuery.data?.items ?? [];
@@ -30,7 +35,10 @@ export function ChatsPage() {
   return (
     // Full-height surface: mobile subtracts top bar + bottom tab bar; desktop
     // runs the sidebar layout with no top chrome (frames F1/F5).
-    <main className="mx-auto flex h-[calc(100dvh-8.25rem)] w-full max-w-6xl lg:h-dvh">
+    <main
+      className="mx-auto flex h-[calc(100dvh-8.25rem)] w-full max-w-6xl lg:h-dvh"
+      style={mobileViewportPx ? { height: `calc(${mobileViewportPx}px - 8.25rem)` } : undefined}
+    >
       <aside
         className={`w-full flex-col border-r border-border md:flex md:w-80 lg:w-96 ${
           activeId ? 'hidden' : 'flex'

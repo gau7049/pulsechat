@@ -367,10 +367,21 @@ function ChatHeader({
     <header className="flex items-center gap-3 border-b border-border px-4 py-2.5">
       <Link
         to="/chats"
-        className="text-fg-muted hover:text-fg md:hidden"
+        className="-ml-1.5 rounded-lg p-1.5 text-fg transition-colors hover:bg-surface-sunken md:hidden"
         aria-label="Back to chats"
       >
-        ←
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="size-6"
+        >
+          <path d="M15 18l-6-6 6-6" />
+        </svg>
       </Link>
       {conversation.type === 'direct' && other ? (
         <Link to={`/u/${other.user.username}`} className="flex min-w-0 flex-1 items-center gap-3">
@@ -996,8 +1007,15 @@ function Composer({
           disabled={draft.trim().length === 0 || uploading !== null}
           loading={edit.isPending}
           aria-label={mode.kind === 'edit' ? 'Save edit' : 'Send'}
+          className={mode.kind === 'edit' ? undefined : 'w-11 shrink-0 px-0'}
         >
-          {mode.kind === 'edit' ? 'Save' : 'Send'}
+          {mode.kind === 'edit' ? (
+            'Save'
+          ) : (
+            <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="size-5">
+              <path d="M3.478 2.404a.75.75 0 0 0-.926.94l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.5 60.5 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.5 60.5 0 0 0 3.478 2.404Z" />
+            </svg>
+          )}
         </Button>
       </div>
 
