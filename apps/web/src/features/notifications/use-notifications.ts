@@ -88,15 +88,17 @@ function isInstalledStandalone(): boolean {
 export function usePushSubscription() {
   const subscribe = useMutation({
     mutationFn: (sub: PushSubscriptionJSON) =>
-      post<{ ok: true }>('/push/subscribe', {
-        endpoint: sub.endpoint,
-        keys: sub.keys,
-        installedPwa: isInstalledStandalone(),
-      }),
+      post<{ ok: true }>(
+        '/push/subscribe',
+        { endpoint: sub.endpoint, keys: sub.keys, installedPwa: isInstalledStandalone() },
+        { silent: true },
+      ),
   });
   const unsubscribe = useMutation({
     mutationFn: (endpoint: string) =>
-      del<{ ok: true }>(`/push/subscribe?endpoint=${encodeURIComponent(endpoint)}`),
+      del<{ ok: true }>(`/push/subscribe?endpoint=${encodeURIComponent(endpoint)}`, {
+        silent: true,
+      }),
   });
   return { subscribe, unsubscribe };
 }

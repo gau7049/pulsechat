@@ -5,6 +5,6 @@ import { post } from '../../lib/api';
 /** POST /reports (Requirement Scope §18) — file a report on a post/message/profile. */
 export function useReport() {
   return useMutation({
-    mutationFn: (body: CreateReportBody) => post<{ ok: true }>('/reports', body),
+    mutationFn: (body: CreateReportBody) => post<{ ok: true }>('/reports', body, { silent: true }),
   });
 }

@@ -2,11 +2,13 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
+import { setApiErrorHandler } from '../../lib/api';
 
 export type ToastKind = 'info' | 'success' | 'error';
 
@@ -65,6 +67,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     },
     [dismiss],
   );
+
+  useEffect(() => {
+    setApiErrorHandler((message) => toast(message, { kind: 'error' }));
+    return () => setApiErrorHandler(null);
+  }, [toast]);
 
   const value = useMemo(() => ({ toast }), [toast]);
 

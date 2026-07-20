@@ -69,7 +69,7 @@ export function useCreateConversation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: CreateConversationBody) =>
-      post<{ conversation: ConversationDto }>('/conversations', body),
+      post<{ conversation: ConversationDto }>('/conversations', body, { silent: true }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: conversationsKey }),
   });
 }
@@ -78,7 +78,7 @@ export function useAddMember(conversationId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: AddMemberBody) =>
-      post<{ ok: true }>(`/conversations/${conversationId}/members`, body),
+      post<{ ok: true }>(`/conversations/${conversationId}/members`, body, { silent: true }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: conversationsKey }),
   });
 }
@@ -87,7 +87,9 @@ export function useLeaveConversation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: { conversationId: string; userId: string }) =>
-      del<{ ok: true }>(`/conversations/${input.conversationId}/members/${input.userId}`),
+      del<{ ok: true }>(`/conversations/${input.conversationId}/members/${input.userId}`, {
+        silent: true,
+      }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: conversationsKey }),
   });
 }
@@ -96,7 +98,7 @@ export function useUpdateGroupPhoto(conversationId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: UpdateGroupPhotoBody) =>
-      patch<{ ok: true }>(`/conversations/${conversationId}/photo`, body),
+      patch<{ ok: true }>(`/conversations/${conversationId}/photo`, body, { silent: true }),
     onSuccess: (_data, body) => {
       patchConversations(queryClient, (items) =>
         items.map((c) => (c.id === conversationId ? { ...c, photoUrl: body.photoUrl } : c)),
@@ -109,7 +111,7 @@ export function useTransferAdmin(conversationId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: TransferAdminBody) =>
-      post<{ ok: true }>(`/conversations/${conversationId}/admin`, body),
+      post<{ ok: true }>(`/conversations/${conversationId}/admin`, body, { silent: true }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: conversationsKey }),
   });
 }
@@ -289,10 +291,11 @@ export function useEditMessage(userId: string, conversation: ConversationDto) {
       const key = await getConversationKey(userId, conversation);
       if (!key) throw new Error('This conversation cannot be decrypted on this device');
       const { ciphertext, nonce } = await encryptMessage(key, input.plaintext);
-      return patch<{ message: MessageDto }>(`/messages/${input.messageId}`, {
-        ciphertext,
-        nonce,
-      });
+      return patch<{ message: MessageDto }>(
+        `/messages/${input.messageId}`,
+        { ciphertext, nonce },
+        { silent: true },
+      );
     },
     onSuccess: ({ message }) => {
       evictDecrypted(message.id);
@@ -310,7 +313,7 @@ export function useDeleteMessage(conversationId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: { messageId: string; scope: 'me' | 'everyone' }) =>
-      del<{ ok: true }>(`/messages/${input.messageId}?scope=${input.scope}`),
+      del<{ ok: true }>(`/messages/${input.messageId}?scope=${input.scope}`, { silent: true }),
     onSuccess: (_data, input) => {
       if (input.scope === 'me') {
         removeMessageLocal(queryClient, conversationId, input.messageId);
@@ -350,7 +353,8 @@ export function useToggleReaction(conversationId: string, userId: string) {
 export function useToggleStar(conversationId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (messageId: string) => post<{ starred: boolean }>(`/messages/${messageId}/star`),
+    mutationFn: (messageId: string) =>
+      post<{ starred: boolean }>(`/messages/${messageId}/star`, undefined, { silent: true }),
     onSuccess: ({ starred }, messageId) => {
       patchMessage(queryClient, conversationId, messageId, (old) => ({ ...old, starred }));
       void queryClient.invalidateQueries({ queryKey: ['chat', 'starred'] });
@@ -374,7 +378,7 @@ export function useConversationSettings(conversationId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (settings: { pinned?: boolean; muted?: boolean; archived?: boolean }) =>
-      patch<{ ok: true }>(`/conversations/${conversationId}`, settings),
+      patch<{ ok: true }>(`/conversations/${conversationId}`, settings, { silent: true }),
     onSuccess: (_data, settings) => {
       patchConversations(queryClient, (items) =>
         items.map((c) => (c.id === conversationId ? { ...c, ...settings } : c)),

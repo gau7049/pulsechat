@@ -50,7 +50,8 @@ export function useDeleteStatus() {
 export function useStartLive() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: StartLiveBody) => post<{ live: LiveSessionDto }>('/live/start', body),
+    mutationFn: (body: StartLiveBody) =>
+      post<{ live: LiveSessionDto }>('/live/start', body, { silent: true }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: feedKey }),
   });
 }
@@ -58,7 +59,7 @@ export function useStartLive() {
 export function useEndLive() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => post<{ ok: true }>('/live/end'),
+    mutationFn: () => post<{ ok: true }>('/live/end', undefined, { silent: true }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: feedKey }),
   });
 }

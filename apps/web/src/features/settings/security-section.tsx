@@ -107,7 +107,7 @@ function EmailBlock() {
           loading={sending}
           onClick={() => {
             setSending(true);
-            post('/auth/verify-email/resend')
+            post('/auth/verify-email/resend', undefined, { silent: true })
               .then(() => toast('Verification email sent', { kind: 'success' }))
               .catch(() => toast('Could not send the email', { kind: 'error' }))
               .finally(() => setSending(false));
@@ -131,11 +131,10 @@ function TwoFactorBlock() {
       // §6.2 — disabling 2FA is step-up gated; enabling isn't sensitive the same way.
       const { user: updated } = await runWithStepUp(
         (stepUpToken) =>
-          post<{ user: MeDto }>(
-            enable ? '/auth/otp/enable' : '/auth/otp/disable',
-            undefined,
-            stepUpToken ? { stepUpToken } : undefined,
-          ),
+          post<{ user: MeDto }>(enable ? '/auth/otp/enable' : '/auth/otp/disable', undefined, {
+            ...(stepUpToken ? { stepUpToken } : {}),
+            silent: true,
+          }),
         requestStepUp,
       );
       setUser(updated);

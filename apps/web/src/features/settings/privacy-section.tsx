@@ -47,7 +47,9 @@ export function PrivacySection() {
 
   async function update(partial: Record<string, unknown>) {
     try {
-      const { user: updated } = await patch<{ user: MeDto }>('/users/me/privacy', partial);
+      const { user: updated } = await patch<{ user: MeDto }>('/users/me/privacy', partial, {
+        silent: true,
+      });
       setUser(updated);
     } catch {
       toast('Could not save that setting — try again', { kind: 'error' });

@@ -9,6 +9,7 @@ const BASE_URL: string = import.meta.env.VITE_API_URL ?? 'http://localhost:4000'
 
 let accessToken: string | null = null;
 let onSessionExpired: (() => void) | null = null;
+let onApiError: ((message: string) => void) | null = null;
 
 export function setAccessToken(token: string | null): void {
   accessToken = token;
@@ -22,6 +23,16 @@ export function getAccessToken(): string | null {
 /** AuthProvider registers a handler that clears state when refresh fails. */
 export function setSessionExpiredHandler(handler: () => void): void {
   onSessionExpired = handler;
+}
+
+/**
+ * ToastProvider registers this once on mount so every failed request — not
+ * just the ones a component remembers to catch — surfaces something visible
+ * by default. Call sites that already show their own more specific error
+ * (a toast or inline text) opt out per-request via `{ silent: true }`.
+ */
+export function setApiErrorHandler(handler: ((message: string) => void) | null): void {
+  onApiError = handler;
 }
 
 export class ApiError extends Error {
@@ -44,6 +55,8 @@ interface RequestOptions {
   noRetry?: boolean;
   /** §6.2 step-up re-auth — sent as `x-step-up-token` for sensitive actions. */
   stepUpToken?: string;
+  /** Suppress the automatic error toast — the caller already shows its own. */
+  silent?: boolean;
 }
 
 async function rawRequest(
@@ -103,32 +116,40 @@ export async function api<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  let response = await rawRequest(method, path, options);
+  try {
+    let response = await rawRequest(method, path, options);
 
-  if (response.status === 401 && !options.noRetry && !path.startsWith('/auth/')) {
-    if (await tryRefresh()) {
-      response = await rawRequest(method, path, options);
-    } else {
-      onSessionExpired?.();
+    if (response.status === 401 && !options.noRetry && !path.startsWith('/auth/')) {
+      if (await tryRefresh()) {
+        response = await rawRequest(method, path, options);
+      } else {
+        onSessionExpired?.();
+      }
     }
-  }
 
-  if (!response.ok) {
-    let errorBody: ApiErrorBody['error'] = { code: 'INTERNAL', message: 'Something went wrong' };
-    try {
-      errorBody = ((await response.json()) as ApiErrorBody).error ?? errorBody;
-    } catch {
-      // Non-JSON failure (network proxy, etc.) — keep the generic error.
+    if (!response.ok) {
+      let errorBody: ApiErrorBody['error'] = { code: 'INTERNAL', message: 'Something went wrong' };
+      try {
+        errorBody = ((await response.json()) as ApiErrorBody).error ?? errorBody;
+      } catch {
+        // Non-JSON failure (network proxy, etc.) — keep the generic error.
+      }
+      throw new ApiError(response.status, errorBody);
     }
-    throw new ApiError(response.status, errorBody);
+    return (await response.json()) as T;
+  } catch (error) {
+    if (!options.silent) {
+      onApiError?.(error instanceof Error ? error.message : 'Something went wrong');
+    }
+    throw error;
   }
-  return (await response.json()) as T;
 }
 
-export const get = <T>(path: string) => api<T>('GET', path);
-export const post = <T>(path: string, body?: unknown, opts?: { stepUpToken?: string }) =>
+type OptsWithSilent = { stepUpToken?: string; silent?: boolean };
+
+export const get = <T>(path: string, opts?: { silent?: boolean }) => api<T>('GET', path, opts);
+export const post = <T>(path: string, body?: unknown, opts?: OptsWithSilent) =>
   api<T>('POST', path, { body, ...opts });
-export const patch = <T>(path: string, body?: unknown, opts?: { stepUpToken?: string }) =>
+export const patch = <T>(path: string, body?: unknown, opts?: OptsWithSilent) =>
   api<T>('PATCH', path, { body, ...opts });
-export const del = <T>(path: string, opts?: { stepUpToken?: string }) =>
-  api<T>('DELETE', path, opts);
+export const del = <T>(path: string, opts?: OptsWithSilent) => api<T>('DELETE', path, opts);

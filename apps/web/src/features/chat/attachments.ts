@@ -49,9 +49,11 @@ export async function uploadAttachment(
     throw new Error('Files are limited to 10 MB');
   }
 
-  const token = await post<SignedUpload>('/uploads/attachment-token', {
-    resourceType: RESOURCE_TYPE[kind],
-  });
+  const token = await post<SignedUpload>(
+    '/uploads/attachment-token',
+    { resourceType: RESOURCE_TYPE[kind] },
+    { silent: true },
+  );
 
   const form = new FormData();
   form.append('file', payload, file.name);
@@ -92,7 +94,11 @@ export async function uploadAttachment(
  * id server-side), so no compression step or size progress is needed here.
  */
 export async function uploadGroupPhoto(conversationId: string, file: File): Promise<string> {
-  const token = await post<SignedUpload>(`/conversations/${conversationId}/photo-upload-token`);
+  const token = await post<SignedUpload>(
+    `/conversations/${conversationId}/photo-upload-token`,
+    undefined,
+    { silent: true },
+  );
 
   const form = new FormData();
   form.append('file', file);

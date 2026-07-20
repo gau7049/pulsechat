@@ -78,7 +78,8 @@ export function useComments(postId: string) {
 export function useCreatePost() {
   const invalidate = useInvalidatePosts();
   return useMutation({
-    mutationFn: (body: CreatePostBody) => httpPost<{ post: PostDto }>('/posts', body),
+    mutationFn: (body: CreatePostBody) =>
+      httpPost<{ post: PostDto }>('/posts', body, { silent: true }),
     onSuccess: invalidate,
   });
 }
@@ -86,7 +87,7 @@ export function useCreatePost() {
 export function useDeletePost() {
   const invalidate = useInvalidatePosts();
   return useMutation({
-    mutationFn: (postId: string) => del<{ ok: true }>(`/posts/${postId}`),
+    mutationFn: (postId: string) => del<{ ok: true }>(`/posts/${postId}`, { silent: true }),
     onSuccess: invalidate,
   });
 }
@@ -120,7 +121,7 @@ export function useCreateComment(postId: string) {
   const invalidate = useInvalidatePosts();
   return useMutation({
     mutationFn: (body: string) =>
-      httpPost<{ comment: CommentDto }>(`/posts/${postId}/comments`, { body }),
+      httpPost<{ comment: CommentDto }>(`/posts/${postId}/comments`, { body }, { silent: true }),
     onSuccess: invalidate,
   });
 }

@@ -744,7 +744,11 @@ function MessageMenu({
                   type="button"
                   aria-label={`React ${emoji}`}
                   onClick={() => {
-                    react.mutate({ messageId: message.id, emoji }, { onError });
+                    // No onError here: unlike star/delete below, this hook has
+                    // other call sites (quick-react bar, reaction pill) that
+                    // rely on the automatic error toast — keeping this one
+                    // consistent with those instead of double-toasting.
+                    react.mutate({ messageId: message.id, emoji });
                     setOpen(false);
                   }}
                   className="rounded-lg p-1 text-base hover:bg-surface-sunken"

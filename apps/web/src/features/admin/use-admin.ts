@@ -28,7 +28,7 @@ export function useReportAction() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, action }: { id: string; action: ReportAction }) =>
-      patch<{ ok: true }>(`/admin/reports/${id}`, { action }),
+      patch<{ ok: true }>(`/admin/reports/${id}`, { action }, { silent: true }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['admin', 'reports'] });
     },
@@ -38,7 +38,7 @@ export function useReportAction() {
 export function useAdminSummary() {
   return useQuery({
     queryKey: ['admin', 'analytics', 'summary'],
-    queryFn: () => get<AdminAnalyticsSummaryDto>('/admin/analytics/summary'),
+    queryFn: () => get<AdminAnalyticsSummaryDto>('/admin/analytics/summary', { silent: true }),
     refetchInterval: 30_000,
   });
 }

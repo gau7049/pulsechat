@@ -94,13 +94,14 @@ export function usePublicProfile(username: string) {
 }
 
 export function useMyInvite() {
-  return useMutation({ mutationFn: () => post<InviteDto>('/invites') });
+  return useMutation({ mutationFn: () => post<InviteDto>('/invites', undefined, { silent: true }) });
 }
 
 export function useSendFriendRequest() {
   const invalidate = useInvalidateSocial();
   return useMutation({
-    mutationFn: (toUserId: string) => post<{ id: string }>('/friend-requests', { toUserId }),
+    mutationFn: (toUserId: string) =>
+      post<{ id: string }>('/friend-requests', { toUserId }, { silent: true }),
     onSuccess: invalidate,
   });
 }
@@ -109,7 +110,11 @@ export function useRespondToRequest() {
   const invalidate = useInvalidateSocial();
   return useMutation({
     mutationFn: (input: { requestId: string; action: 'accept' | 'reject' | 'cancel' }) =>
-      patch<{ ok: true }>(`/friend-requests/${input.requestId}`, { action: input.action }),
+      patch<{ ok: true }>(
+        `/friend-requests/${input.requestId}`,
+        { action: input.action },
+        { silent: true },
+      ),
     onSuccess: invalidate,
   });
 }
@@ -117,7 +122,7 @@ export function useRespondToRequest() {
 export function useRemoveFriend() {
   const invalidate = useInvalidateSocial();
   return useMutation({
-    mutationFn: (userId: string) => del<{ ok: true }>(`/friends/${userId}`),
+    mutationFn: (userId: string) => del<{ ok: true }>(`/friends/${userId}`, { silent: true }),
     onSuccess: invalidate,
   });
 }
@@ -125,7 +130,7 @@ export function useRemoveFriend() {
 export function useBlockUser() {
   const invalidate = useInvalidateSocial();
   return useMutation({
-    mutationFn: (userId: string) => post<{ ok: true }>('/blocks', { userId }),
+    mutationFn: (userId: string) => post<{ ok: true }>('/blocks', { userId }, { silent: true }),
     onSuccess: invalidate,
   });
 }
@@ -133,7 +138,7 @@ export function useBlockUser() {
 export function useUnblockUser() {
   const invalidate = useInvalidateSocial();
   return useMutation({
-    mutationFn: (userId: string) => del<{ ok: true }>(`/blocks/${userId}`),
+    mutationFn: (userId: string) => del<{ ok: true }>(`/blocks/${userId}`, { silent: true }),
     onSuccess: invalidate,
   });
 }
