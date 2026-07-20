@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Link } from 'react-router-dom';
 import type { ConversationDto, MessageDto } from '@pulsechat/shared';
+import { BlurUpImage } from '../../components/ui/blur-up-image';
 import { Button } from '../../components/ui/button';
 import { Modal } from '../../components/ui/modal';
 import { Skeleton } from '../../components/ui/skeleton';
 import { useToast } from '../../components/ui/toast';
 import { ApiError } from '../../lib/api';
-import { handleImageError } from '../../lib/image-fallback';
 import { registerPlayingAudio } from '../../lib/solo-audio';
 import { ReportModal } from '../reports/report-modal';
 import { UserCard } from '../social/user-card';
@@ -319,11 +319,9 @@ function BubbleContent({
             onClick={() => onImageClick(envelope.attachment.url, envelope.attachment.name)}
             className="block cursor-zoom-in"
           >
-            <img
+            <BlurUpImage
               src={envelope.attachment.url}
               alt={envelope.attachment.name}
-              loading="lazy"
-              onError={handleImageError}
               className="max-h-72 max-w-full rounded-lg object-contain"
             />
           </button>
@@ -376,10 +374,9 @@ function BubbleContent({
           className="block overflow-hidden rounded-lg border border-white/20"
         >
           {envelope.post.mediaUrl && (
-            <img
+            <BlurUpImage
               src={envelope.post.mediaUrl}
               alt=""
-              onError={handleImageError}
               className="max-h-56 w-full object-cover"
             />
           )}
@@ -395,10 +392,9 @@ function BubbleContent({
       return (
         <span className="block">
           {envelope.story.mediaUrl && (
-            <img
+            <BlurUpImage
               src={envelope.story.mediaUrl}
               alt=""
-              onError={handleImageError}
               className="mb-1 max-h-40 w-28 rounded-lg border border-white/20 object-cover"
             />
           )}
@@ -458,11 +454,10 @@ function ImageLightbox({
         onClick={onClose}
         className="flex min-h-0 flex-1 cursor-zoom-out items-center justify-center p-2"
       >
-        <img
+        <BlurUpImage
           src={image.url}
           alt={image.name}
           onClick={(e) => e.stopPropagation()}
-          onError={handleImageError}
           className="max-h-full max-w-full cursor-default object-contain"
         />
       </button>

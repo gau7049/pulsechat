@@ -6,9 +6,9 @@ import {
   type UserSummaryDto,
 } from '@pulsechat/shared';
 import { Avatar } from '../../components/ui/avatar';
+import { BlurUpImage } from '../../components/ui/blur-up-image';
 import { Button } from '../../components/ui/button';
 import { useToast } from '../../components/ui/toast';
-import { handleImageError } from '../../lib/image-fallback';
 import { registerPlayingAudio } from '../../lib/solo-audio';
 import { useAuth } from '../auth/auth-context';
 import { generateContentKey, wrapKeyFor } from '../../lib/crypto/conversation-keys';
@@ -156,10 +156,9 @@ export function StatusViewer({
           className="absolute inset-y-0 right-0 w-1/3"
         />
         {status.mediaUrl ? (
-          <img
+          <BlurUpImage
             src={status.mediaUrl}
             alt=""
-            onError={handleImageError}
             className="max-h-full max-w-full object-contain"
           />
         ) : (

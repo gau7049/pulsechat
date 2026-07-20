@@ -233,6 +233,10 @@ export function StatusComposer({ onClose }: { onClose: () => void }) {
             setAnnotating(null);
             setPicked(edited);
           }}
+          onSkip={(original) => {
+            setAnnotating(null);
+            setPicked(original);
+          }}
           onCancel={() => setAnnotating(null)}
         />
       )}

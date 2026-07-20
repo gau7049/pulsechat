@@ -738,6 +738,11 @@ function Composer({
   const [uploading, setUploading] = useState<number | null>(null);
   const [showStickers, setShowStickers] = useState(false);
   const [annotating, setAnnotating] = useState<File | null>(null);
+  // A local thumbnail of the image currently uploading, so "sending" reads as
+  // "your photo, in progress" instead of a bare grey/mystery progress bar.
+  const [sendingPreview, setSendingPreview] = useState<string | null>(null);
+  const [uploadStalled, setUploadStalled] = useState(false);
+  const lastProgressAtRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingKind = useRef<AttachmentKind>('image');
   const typingUntil = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -819,9 +824,22 @@ function Composer({
 
   async function sendAttachment(file: File): Promise<void> {
     const kind = pendingKind.current;
+    const previewUrl = kind === 'image' ? URL.createObjectURL(file) : null;
+    if (previewUrl) setSendingPreview(previewUrl);
+    lastProgressAtRef.current = Date.now();
+    setUploadStalled(false);
+    // If no progress event arrives for a while, say so explicitly instead of
+    // leaving a motionless bar that looks identical whether it's slow or dead.
+    const stallCheck = window.setInterval(() => {
+      if (Date.now() - lastProgressAtRef.current > 8000) setUploadStalled(true);
+    }, 2000);
     try {
       setUploading(0);
-      const attachment = await uploadAttachment(file, kind, setUploading);
+      const attachment = await uploadAttachment(file, kind, (fraction) => {
+        lastProgressAtRef.current = Date.now();
+        setUploadStalled(false);
+        setUploading(fraction);
+      });
       const envelope: MessageEnvelope = {
         v: 1,
         type: kind,
@@ -837,6 +855,11 @@ function Composer({
       toast(error instanceof Error ? error.message : 'Upload failed', { kind: 'error' });
     } finally {
       setUploading(null);
+      window.clearInterval(stallCheck);
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+        setSendingPreview(null);
+      }
     }
   }
 
@@ -892,19 +915,44 @@ function Composer({
         </div>
       )}
 
-      {uploading !== null && (
-        <div
-          role="progressbar"
-          aria-valuenow={Math.round(uploading * 100)}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          className="h-1 overflow-hidden rounded bg-surface-sunken"
-        >
-          <div
-            className="h-full bg-accent transition-all"
-            style={{ width: `${uploading * 100}%` }}
-          />
+      {uploading !== null && sendingPreview ? (
+        <div className="mb-2 flex items-center gap-3 rounded-xl border border-border bg-surface-sunken p-2">
+          <img src={sendingPreview} alt="" className="size-12 shrink-0 rounded-lg object-cover" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-medium text-fg">
+              {uploadStalled
+                ? 'Still uploading — check your connection'
+                : `Sending photo… ${Math.round(uploading * 100)}%`}
+            </p>
+            <div
+              role="progressbar"
+              aria-valuenow={Math.round(uploading * 100)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-raised"
+            >
+              <div
+                className="h-full bg-accent transition-all"
+                style={{ width: `${uploading * 100}%` }}
+              />
+            </div>
+          </div>
         </div>
+      ) : (
+        uploading !== null && (
+          <div
+            role="progressbar"
+            aria-valuenow={Math.round(uploading * 100)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            className="h-1 overflow-hidden rounded bg-surface-sunken"
+          >
+            <div
+              className="h-full bg-accent transition-all"
+              style={{ width: `${uploading * 100}%` }}
+            />
+          </div>
+        )
       )}
 
       <div className="flex items-end gap-2">
@@ -1032,6 +1080,10 @@ function Composer({
           onDone={(edited) => {
             setAnnotating(null);
             void sendAttachment(edited);
+          }}
+          onSkip={(original) => {
+            setAnnotating(null);
+            void sendAttachment(original);
           }}
           onCancel={() => setAnnotating(null)}
         />
