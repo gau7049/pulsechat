@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { TrendingMovieDto, TrendingSongDto } from '@pulsechat/shared';
 import { Modal } from '../../components/ui/modal';
 import { Skeleton } from '../../components/ui/skeleton';
+import { handleImageError } from '../../lib/image-fallback';
 import { useTrendingMovies, useTrendingSongs } from './use-discover';
 
 /**
@@ -52,6 +53,7 @@ export function TrendingSection() {
                       src={movie.posterUrl}
                       alt=""
                       loading="lazy"
+                      onError={handleImageError}
                       className="size-full object-cover"
                     />
                   )}
@@ -81,6 +83,7 @@ export function TrendingSection() {
               <img
                 src={openMovie.posterUrl}
                 alt=""
+                onError={handleImageError}
                 className="h-40 w-28 shrink-0 rounded-xl object-cover"
               />
             )}
@@ -98,7 +101,14 @@ function SongRow({ song }: { song: TrendingSongDto }) {
   return (
     <div className="flex items-center gap-3 rounded-xl px-1 py-1">
       <div className="size-10 shrink-0 overflow-hidden rounded-lg bg-surface-sunken">
-        {song.coverUrl && <img src={song.coverUrl} alt="" className="size-full object-cover" />}
+        {song.coverUrl && (
+          <img
+            src={song.coverUrl}
+            alt=""
+            onError={handleImageError}
+            className="size-full object-cover"
+          />
+        )}
       </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-fg">{song.title}</p>

@@ -6,6 +6,7 @@ import { Modal } from '../../components/ui/modal';
 import { Skeleton } from '../../components/ui/skeleton';
 import { useToast } from '../../components/ui/toast';
 import { ApiError } from '../../lib/api';
+import { handleImageError } from '../../lib/image-fallback';
 import { ReportModal } from '../reports/report-modal';
 import { UserCard } from '../social/user-card';
 import { ackEmitter, getAckVersion, liveAggregate } from './chat-live-store';
@@ -321,6 +322,7 @@ function BubbleContent({
               src={envelope.attachment.url}
               alt={envelope.attachment.name}
               loading="lazy"
+              onError={handleImageError}
               className="max-h-72 max-w-full rounded-lg object-contain"
             />
           </button>
@@ -366,7 +368,12 @@ function BubbleContent({
           className="block overflow-hidden rounded-lg border border-white/20"
         >
           {envelope.post.mediaUrl && (
-            <img src={envelope.post.mediaUrl} alt="" className="max-h-56 w-full object-cover" />
+            <img
+              src={envelope.post.mediaUrl}
+              alt=""
+              onError={handleImageError}
+              className="max-h-56 w-full object-cover"
+            />
           )}
           <span className="block px-2 py-1.5 text-xs">
             <span className="font-semibold">{envelope.post.authorDisplayName}</span>
@@ -383,6 +390,7 @@ function BubbleContent({
             <img
               src={envelope.story.mediaUrl}
               alt=""
+              onError={handleImageError}
               className="mb-1 max-h-40 w-28 rounded-lg border border-white/20 object-cover"
             />
           )}
@@ -446,6 +454,7 @@ function ImageLightbox({
           src={image.url}
           alt={image.name}
           onClick={(e) => e.stopPropagation()}
+          onError={handleImageError}
           className="max-h-full max-w-full cursor-default object-contain"
         />
       </button>

@@ -1,4 +1,5 @@
 import { useState, type MouseEvent } from 'react';
+import { handleImageError } from '../../lib/image-fallback';
 
 export interface ProgressiveImageProps {
   src: string;
@@ -43,6 +44,10 @@ export function ProgressiveImage({
         loading="lazy"
         decoding="async"
         onLoad={() => setLoaded(true)}
+        onError={(e) => {
+          setLoaded(true);
+          handleImageError(e);
+        }}
         {...(protectedContent
           ? {
               onContextMenu: (e: MouseEvent) => e.preventDefault(),

@@ -355,6 +355,13 @@ function ChatHeader({
   const subtitle =
     conversation.type === 'group' ? `${conversation.members.length} members` : lastSeenLabel(other);
   const startCall = useStartCall();
+  const { toast } = useToast();
+
+  const handleStartCall = (kind: 'audio' | 'video') => {
+    if (!other) return;
+    toast('Calls work best on similar networks — connecting…', { kind: 'info' });
+    void startCall(other.user, kind);
+  };
 
   return (
     <header className="flex items-center gap-3 border-b border-border px-4 py-2.5">
@@ -402,7 +409,7 @@ function ChatHeader({
             type="button"
             aria-label="Start a voice call"
             title="Voice call"
-            onClick={() => void startCall(other.user, 'audio')}
+            onClick={() => handleStartCall('audio')}
             className="rounded-lg px-2 py-1 text-fg-muted hover:bg-surface-sunken hover:text-fg"
           >
             📞
@@ -411,7 +418,7 @@ function ChatHeader({
             type="button"
             aria-label="Start a video call"
             title="Video call"
-            onClick={() => void startCall(other.user, 'video')}
+            onClick={() => handleStartCall('video')}
             className="rounded-lg px-2 py-1 text-fg-muted hover:bg-surface-sunken hover:text-fg"
           >
             🎥

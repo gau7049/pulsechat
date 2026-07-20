@@ -4,6 +4,7 @@ import { Avatar } from '../../components/ui/avatar';
 import { Button } from '../../components/ui/button';
 import { EmptyState } from '../../components/ui/empty-state';
 import { SkeletonRow } from '../../components/ui/skeleton';
+import { handleImageError } from '../../lib/image-fallback';
 import { deepLinkFor, describeNotification, thumbnailFor } from './notification-utils';
 import { unreadCountFrom, useMarkAllRead, useNotifications } from './use-notifications';
 
@@ -99,6 +100,7 @@ export function NotificationBell() {
                       src={thumbnail}
                       alt=""
                       loading="lazy"
+                      onError={handleImageError}
                       className="size-9 shrink-0 rounded-md object-cover"
                     />
                   )}

@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+
 type Size = 'sm' | 'md' | 'lg' | 'xl';
 
 export interface AvatarProps {
@@ -26,10 +28,18 @@ function initials(name: string): string {
 
 /** User avatar with image fallback to initials, plus optional presence dot. */
 export function Avatar({ name, src, size = 'md', online }: AvatarProps) {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [src]);
+
   return (
     <span className={`relative inline-flex shrink-0 ${sizeClasses[size]}`}>
-      {src ? (
-        <img src={src} alt={name} className="size-full rounded-full object-cover" />
+      {src && !failed ? (
+        <img
+          src={src}
+          alt={name}
+          onError={() => setFailed(true)}
+          className="size-full rounded-full object-cover"
+        />
       ) : (
         <span
           role="img"

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ConversationDto, MessageDto } from '@pulsechat/shared';
 import { EmptyState } from '../../components/ui/empty-state';
 import { Modal } from '../../components/ui/modal';
+import { handleImageError } from '../../lib/image-fallback';
 import { decryptAndCache } from './use-decrypted-message';
 import { parseEnvelope, type MessageEnvelope } from './message-envelope';
 import { useMessages } from './use-chat';
@@ -135,6 +136,7 @@ export function MediaGalleryModal({
                     <img
                       src={envelope.attachment.url}
                       alt={envelope.attachment.name}
+                      onError={handleImageError}
                       className="size-full object-cover"
                     />
                   ) : (

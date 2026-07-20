@@ -8,6 +8,7 @@ import { Modal } from '../../components/ui/modal';
 import { Skeleton } from '../../components/ui/skeleton';
 import { useToast } from '../../components/ui/toast';
 import { ApiError } from '../../lib/api';
+import { handleImageError } from '../../lib/image-fallback';
 import { LiveViewer } from '../calls/live-viewer';
 import { PostThumbnail } from '../posts/post-card';
 import { useUserPosts } from '../posts/use-posts';
@@ -180,6 +181,7 @@ function ProfileAvatar({ user }: { user: UserSummaryDto }) {
             <img
               src={user.avatarUrl}
               alt={user.displayName}
+              onError={handleImageError}
               className="max-h-[70vh] w-full rounded-xl object-contain"
             />
           ) : (
