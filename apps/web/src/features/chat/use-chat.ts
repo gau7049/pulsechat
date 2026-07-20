@@ -27,6 +27,7 @@ import {
 } from '@pulsechat/shared';
 import { del, get, patch, post } from '../../lib/api';
 import { getSocket } from '../../lib/socket';
+import { playSound } from '../../lib/sound';
 import { getConversationKey } from './chat-keys';
 import { encryptMessage } from '../../lib/crypto/conversation-keys';
 import * as outbox from './outbox';
@@ -229,6 +230,7 @@ async function attemptSend(queryClient: QueryClient, entry: outbox.OutboxEntry):
     })) as MessageSendAck;
     if (ack.ok) {
       outbox.remove(entry.clientUuid);
+      playSound('send');
       insertMessage(queryClient, ack.message);
       patchConversations(queryClient, (items) =>
         items.map((c) => (c.id === entry.conversationId ? { ...c, lastMessage: ack.message } : c)),
@@ -424,6 +426,7 @@ export function useChatSocketBridge(userId: string | undefined): void {
       insertMessage(queryClient, message);
       bumpConversation(queryClient, message, userId);
       if (message.senderId !== userId) {
+        playSound('receive');
         const viewing =
           getActiveConversation() === message.conversationId &&
           document.visibilityState === 'visible';
