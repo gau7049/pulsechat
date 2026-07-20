@@ -4,6 +4,7 @@ import { logger } from '../lib/logger.js';
 import * as authTokens from '../repositories/auth-token.repository.js';
 import * as devices from '../repositories/device.repository.js';
 import * as users from '../repositories/user.repository.js';
+import type { UserWithPrivacy } from '../repositories/user.repository.js';
 import { recordAudit } from './audit.service.js';
 import { passwordResetEmail, sendEmail } from './email.service.js';
 import { hashPassword, verifyPassword } from './password.service.js';
@@ -35,6 +36,34 @@ export async function changePassword(
     'password changed; other sessions revoked',
   );
   await recordAudit(userId, 'password_changed', { ip: context.ip, device: context.userAgent });
+}
+
+/**
+ * Encryption-key recovery: a device that lost its local keypair generates a
+ * fresh one and registers it as the account's public key, so it can start
+ * new conversations again. Existing conversations' wrapped keys were sealed
+ * to the old public key and stay unreadable — there is no rewrap mechanism
+ * (see chat-keys.ts / conversation-keys.ts comments). Password-gated the
+ * same way as changePassword, not step-up — the caller already needs the
+ * plaintext password locally to re-derive the Argon2id wrap.
+ */
+export async function rotateEncryptionKey(
+  userId: string,
+  currentPassword: string,
+  publicKey: string,
+  context: RequestContext,
+): Promise<UserWithPrivacy> {
+  const user = await users.findById(userId);
+  if (!user) throw new AppError('UNAUTHORIZED', 'Account unavailable');
+  const ok = await verifyPassword(user.passwordHash, currentPassword);
+  if (!ok) {
+    throw new AppError('VALIDATION_FAILED', 'Current password is incorrect', {
+      currentPassword: ['Current password is incorrect'],
+    });
+  }
+  const updated = await users.updateUser(userId, { publicKey });
+  await recordAudit(userId, 'encryption_key_rotated', { ip: context.ip, device: context.userAgent });
+  return updated;
 }
 
 /** §6.3 forgot password — emails a single-use reset link when the email exists. */

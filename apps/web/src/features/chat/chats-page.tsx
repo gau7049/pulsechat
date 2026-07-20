@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import type { MeDto } from '@pulsechat/shared';
 import { Button } from '../../components/ui/button';
 import { EmptyState } from '../../components/ui/empty-state';
 import { Input } from '../../components/ui/input';
@@ -16,10 +17,10 @@ import { useConversations } from './use-chat';
  * stacked on mobile. Also owns the encryption-key device states (§6).
  */
 export function ChatsPage() {
-  const { user } = useAuth();
+  const { user, setUser } = useAuth();
   const { id: activeId } = useParams();
   const conversationsQuery = useConversations();
-  const { status: keyStatus, unlock } = useKeyStatus(user?.id);
+  const { status: keyStatus, unlock, recover } = useKeyStatus(user?.id);
   const [showNewChat, setShowNewChat] = useState(false);
 
   if (!user) return null;
@@ -55,11 +56,7 @@ export function ChatsPage() {
 
         {keyStatus === 'locked' && <UnlockPanel unlock={unlock} />}
         {keyStatus === 'missing' && (
-          <p className="mx-4 mb-2 rounded-xl bg-danger/10 px-3 py-2 text-xs text-danger">
-            This device has no encryption keys for your account, so existing conversations can't be
-            decrypted here. Sign in on the browser where you registered. (Key portability is a known
-            limitation of the end-to-end design.)
-          </p>
+          <RecoverPanel recover={recover} onRecovered={setUser} />
         )}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
@@ -157,6 +154,68 @@ function UnlockPanel({ unlock }: { unlock: (password: string) => Promise<boolean
       />
       <Button type="submit" size="sm" loading={busy} disabled={password.length === 0}>
         Unlock messages
+      </Button>
+    </form>
+  );
+}
+
+/** For a device with no local keypair at all — starts fresh instead of staying stuck. */
+function RecoverPanel({
+  recover,
+  onRecovered,
+}: {
+  recover: (password: string) => Promise<{ ok: true; user: MeDto } | { ok: false; error: string }>;
+  onRecovered: (user: MeDto) => void;
+}) {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function onSubmit(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    const result = await recover(password);
+    setBusy(false);
+    if (result.ok) {
+      onRecovered(result.user);
+    } else {
+      setError(result.error);
+    }
+  }
+
+  return (
+    <form
+      onSubmit={(e) => void onSubmit(e)}
+      className="mx-4 mb-2 flex flex-col gap-2 rounded-xl border border-danger/30 bg-danger/10 p-3"
+    >
+      <p className="text-xs text-danger">
+        This device has no encryption keys for your account, so existing conversations can't be
+        decrypted here — sign in on the browser where you registered to read them. (Key
+        portability is a known limitation of the end-to-end design.)
+      </p>
+      <p className="text-xs text-fg-muted">
+        To start new conversations on this device instead, set up a new encryption key here.
+        Existing conversations will stay unreadable on this device, and if you're signed into
+        this account anywhere else with working keys, this will break decryption there too.
+      </p>
+      <Input
+        label="Password"
+        type="password"
+        autoComplete="current-password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        error={error ?? undefined}
+        required
+      />
+      <Button
+        type="submit"
+        size="sm"
+        variant="secondary"
+        loading={busy}
+        disabled={password.length === 0}
+      >
+        Set up encryption on this device
       </Button>
     </form>
   );

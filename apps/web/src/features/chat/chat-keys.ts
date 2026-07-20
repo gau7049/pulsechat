@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ConversationDto } from '@pulsechat/shared';
-import { hasLocalKeypair, unlockPrivateKey } from '../../lib/crypto/keys';
+import type { ConversationDto, MeDto } from '@pulsechat/shared';
+import { patch } from '../../lib/api';
+import { generateKeypair, hasLocalKeypair, unlockPrivateKey } from '../../lib/crypto/keys';
 import { loadSessionKey, saveSessionKey } from '../../lib/crypto/key-session';
 import { unwrapKey } from '../../lib/crypto/conversation-keys';
 
@@ -78,5 +79,36 @@ export function useKeyStatus(userId: string | undefined) {
     [userId],
   );
 
-  return { status, unlock };
+  /**
+   * For the 'missing' state: generates a brand-new keypair on this device and
+   * registers it as the account's public key, so it can start new
+   * conversations again. Existing conversations stay unreadable here — their
+   * wrapped keys were sealed to the key that was lost, and nothing rewraps
+   * them (see conversation-keys.ts's forward-secrecy comment for the same
+   * class of trade-off).
+   */
+  const recover = useCallback(
+    async (password: string): Promise<{ ok: true; user: MeDto } | { ok: false; error: string }> => {
+      if (!userId) return { ok: false, error: 'Not signed in' };
+      try {
+        const keypair = await generateKeypair(password);
+        const { user } = await patch<{ user: MeDto }>('/account/encryption-key', {
+          currentPassword: password,
+          publicKey: keypair.publicKey,
+        });
+        await keypair.store(userId);
+        await saveSessionKey(userId, keypair.privateKey);
+        notifyKeyChange();
+        return { ok: true, user };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : 'Could not set up encryption on this device',
+        };
+      }
+    },
+    [userId],
+  );
+
+  return { status, unlock, recover };
 }

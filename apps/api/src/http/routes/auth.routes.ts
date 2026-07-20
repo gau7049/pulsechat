@@ -9,12 +9,14 @@ import {
   otpVerifySchema,
   registerBodySchema,
   resetPasswordSchema,
+  rotateEncryptionKeySchema,
   stepUpSchema,
   type AuthResultDto,
   type DeviceDto,
   type LoginBody,
   type OtpChallengeDto,
   type RegisterBody,
+  type RotateEncryptionKeyBody,
   type StepUpBody,
 } from '@pulsechat/shared';
 import { env } from '../../config/env.js';
@@ -244,6 +246,23 @@ authRouter.patch(
       requestContext(req),
     );
     res.json({ changed: true });
+  },
+);
+
+authRouter.patch(
+  '/account/encryption-key',
+  requireAuth,
+  authLimiter,
+  validateBody(rotateEncryptionKeySchema),
+  async (req, res) => {
+    const { currentPassword, publicKey } = req.body as RotateEncryptionKeyBody;
+    const updated = await passwordFlows.rotateEncryptionKey(
+      req.auth!.sub,
+      currentPassword,
+      publicKey,
+      requestContext(req),
+    );
+    res.json({ user: toMeDto(updated) });
   },
 );
 

@@ -23,7 +23,9 @@ export type AuditEvent =
   | 'account_deleted'
   | 'account_restored'
   /** §6.2 — a rotated-away refresh token was replayed; every session was revoked. */
-  | 'refresh_token_reuse_detected';
+  | 'refresh_token_reuse_detected'
+  /** A device generated a fresh keypair after losing its local one — old conversations on that device stay unreadable. */
+  | 'encryption_key_rotated';
 
 export async function recordAudit(
   userId: string,

@@ -82,6 +82,19 @@ export const changePasswordSchema = z.object({
 });
 export type ChangePasswordBody = z.infer<typeof changePasswordSchema>;
 
+/**
+ * PATCH /account/encryption-key — generates a fresh keypair on a device that
+ * lost its local one (e.g. OS/cleaner-app storage wipe) so the account can
+ * keep chatting going forward. Password-gated like changePasswordSchema
+ * rather than step-up-token-gated, since the client already needs the
+ * plaintext password to re-derive the local Argon2id wrap either way.
+ */
+export const rotateEncryptionKeySchema = z.object({
+  currentPassword: z.string().min(1, 'Current password is required'),
+  publicKey: z.string().min(32).max(128),
+});
+export type RotateEncryptionKeyBody = z.infer<typeof rotateEncryptionKeySchema>;
+
 export const forgotPasswordSchema = z.object({
   email: recoveryEmailSchema,
   turnstileToken: z.string().min(1).optional(),
