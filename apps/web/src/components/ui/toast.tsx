@@ -15,7 +15,9 @@ export interface ToastOptions {
   /** Optional action, e.g. Undo after a destructive action (Scope §20). */
   actionLabel?: string;
   onAction?: () => void;
-  durationMs?: number;
+  /** Pass `null` to keep the toast until manually dismissed (✕ or the action
+   * button) — for things the user shouldn't miss by looking away for 5s. */
+  durationMs?: number | null;
 }
 
 interface ToastItem extends Required<Pick<ToastOptions, 'kind'>> {
@@ -57,7 +59,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         onAction: options.onAction,
       };
       setItems((prev) => [...prev, item]);
-      window.setTimeout(() => dismiss(id), options.durationMs ?? 5000);
+      if (options.durationMs !== null) {
+        window.setTimeout(() => dismiss(id), options.durationMs ?? 5000);
+      }
     },
     [dismiss],
   );

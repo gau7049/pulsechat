@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { ToastProvider } from '../components/ui/toast';
 import { AuthProvider } from '../features/auth/auth-context';
+import { ServiceWorkerUpdateWatcher } from '../features/pwa/use-sw-update';
 import { ThemeProvider } from './theme';
 
 /**
@@ -23,6 +24,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <ToastProvider>
+          <ServiceWorkerUpdateWatcher />
           <AuthProvider>{children}</AuthProvider>
         </ToastProvider>
       </ThemeProvider>
