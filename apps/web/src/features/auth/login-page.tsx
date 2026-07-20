@@ -77,11 +77,15 @@ export function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await post('/auth/magic-link', {
-        email: magicEmail.trim(),
-        turnstileToken: turnstileToken ?? undefined,
-      });
-      setStage({ name: 'magic_sent', email: magicEmail.trim() });
+      const result = await post<{ sent: true } | { sent: false; reason: string }>(
+        '/auth/magic-link',
+        { email: magicEmail.trim(), turnstileToken: turnstileToken ?? undefined },
+      );
+      if (result.sent) {
+        setStage({ name: 'magic_sent', email: magicEmail.trim() });
+      } else {
+        setError(result.reason);
+      }
     } catch (err) {
       if (err instanceof ApiError && err.details?.email) {
         setError(err.details.email[0] ?? err.message);

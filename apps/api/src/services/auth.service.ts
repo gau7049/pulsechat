@@ -326,12 +326,24 @@ export async function confirmDevice(rawToken: string, context: RequestContext): 
 
 // ── Magic link (§6.2) ────────────────────────────────────────────────────────
 
-export async function requestMagicLink(email: string): Promise<void> {
+/**
+ * Deliberately reveals whether the email is registered (product decision,
+ * accepted trade-off for a small personal-project user base — an
+ * enumeration risk unlike the otherwise-identical "forgot password" flow,
+ * which stays silent).
+ */
+export async function requestMagicLink(
+  email: string,
+): Promise<{ sent: true } | { sent: false; reason: string }> {
   const user = await users.findByEmail(email);
-  // Silently succeed for unknown emails — never confirm account existence.
-  if (!user || !user.emailVerified || user.status === 'deleted') {
-    logger.info({ event: 'auth.magic_link_unknown_email' }, 'magic link for unknown email ignored');
-    return;
+  if (!user || user.status === 'deleted') {
+    return { sent: false, reason: 'No account found with that email' };
+  }
+  if (!user.emailVerified) {
+    return {
+      sent: false,
+      reason: "This email hasn't been verified yet — check your inbox, or sign in with your password",
+    };
   }
   await authTokens.invalidateUserTokens(user.id, 'magic_link');
   const { token, tokenHash } = generateEmailToken();
@@ -342,6 +354,7 @@ export async function requestMagicLink(email: string): Promise<void> {
     expiresAt: new Date(Date.now() + MAGIC_LINK_TTL_MS),
   });
   await sendEmail(magicLinkEmail(email, `${env.APP_ORIGIN}/magic-link?token=${token}`));
+  return { sent: true };
 }
 
 export async function verifyMagicLink(

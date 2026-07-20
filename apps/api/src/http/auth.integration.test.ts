@@ -277,11 +277,12 @@ describe('email verification + magic link', () => {
     expect(replay.status).toBe(401);
   });
 
-  it('accepts magic-link requests for unknown emails without leaking existence', async () => {
+  it('tells the caller an unknown email has no account instead of sending anything', async () => {
     const res = await request(app)
       .post('/auth/magic-link')
       .send({ email: `${uname()}@gmail.com` });
     expect(res.status).toBe(202);
+    expect(res.body).toEqual({ sent: false, reason: expect.any(String) as string });
     expect(sentEmails).toHaveLength(0);
   });
 });

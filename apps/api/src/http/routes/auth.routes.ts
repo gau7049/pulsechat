@@ -55,12 +55,27 @@ function requestContext(req: Request): auth.RequestContext {
  * every relaunch even though the underlying token was still valid. An
  * explicit short maxAge gives the same "must re-auth without remember me"
  * guarantee while surviving that close/reopen cycle.
+ *
+ * `sameSite: 'none'` in production (not 'strict'): the web app (Vercel) and
+ * this API (Render) are on different domains by design (see app.ts's CORS
+ * setup) — that makes every request genuinely cross-site, and browsers
+ * never attach a `sameSite: 'strict'`/`'lax'` cookie to a cross-site
+ * request, including the app's own legitimate calls to its own API. That
+ * silently dropped the cookie on every `/auth/refresh`, logging users out
+ * on every page reload. `'none'` requires `secure: true` — the spec rejects
+ * `SameSite=None` without it — so both flip together on the same
+ * production check; local dev stays `'lax'`/insecure since `localhost:8000`
+ * and `localhost:4000` are same-site (SameSite ignores port) and dev runs
+ * over plain HTTP. CSRF protection for the two routes that trust this
+ * cookie comes from the independent `requireSameOrigin` Origin/Referer
+ * check, not from SameSite.
  */
 function setRefreshCookie(res: Response, token: string, rememberMe: boolean): void {
+  const isProd = env.NODE_ENV === 'production';
   res.cookie(REFRESH_COOKIE, token, {
     httpOnly: true,
-    secure: env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
     path: '/auth',
     maxAge: rememberMe ? REFRESH_COOKIE_MAX_AGE_MS : SESSION_ONLY_COOKIE_MAX_AGE_MS,
   });
@@ -145,9 +160,8 @@ authRouter.post(
   async (req, res) => {
     const { email, turnstileToken } = req.body as { email: string; turnstileToken?: string };
     await assertHuman(turnstileToken, req.ip);
-    await auth.requestMagicLink(email);
-    // Always 202 — never reveal whether the email has an account.
-    res.status(202).json({ sent: true });
+    const result = await auth.requestMagicLink(email);
+    res.status(202).json(result);
   },
 );
 
