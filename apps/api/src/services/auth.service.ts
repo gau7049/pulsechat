@@ -160,6 +160,30 @@ export async function sendVerificationEmail(userId: string, email: string): Prom
   await sendEmail(verificationEmail(email, `${env.APP_ORIGIN}/verify-email?token=${token}`));
 }
 
+/**
+ * For an account that skipped the optional recovery email at signup (§6.1)
+ * and wants to add one from Settings afterward — previously had no code
+ * path at all, leaving those accounts permanently unable to enable
+ * password recovery/magic-link/2FA. Changing an existing verified email is
+ * a separate, more sensitive flow and not handled here.
+ */
+export async function addRecoveryEmail(userId: string, email: string): Promise<UserWithPrivacy> {
+  const user = await users.findById(userId);
+  if (!user) throw new AppError('UNAUTHORIZED', 'Account unavailable');
+  if (user.email) {
+    throw new AppError('VALIDATION_FAILED', 'This account already has a recovery email');
+  }
+  const emailTaken = await users.findByEmail(email);
+  if (emailTaken) {
+    throw new AppError('CONFLICT', 'This email is already in use', {
+      email: ['This email is already linked to another account'],
+    });
+  }
+  const updated = await users.updateUser(userId, { email, emailVerified: false });
+  await sendVerificationEmail(userId, email);
+  return updated;
+}
+
 // ── Login ────────────────────────────────────────────────────────────────────
 
 export type LoginOutcome =

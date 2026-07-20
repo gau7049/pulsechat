@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import {
+  addRecoveryEmailSchema,
   postsQuerySchema,
   updatePrivacySchema,
   updateProfileSchema,
+  type AddRecoveryEmailBody,
   type AuditLogEntryDto,
   type PaginationQuery,
   type UpdatePrivacyBody,
@@ -11,6 +13,7 @@ import {
 } from '@pulsechat/shared';
 import { prisma } from '../../lib/prisma.js';
 import * as users from '../../repositories/user.repository.js';
+import { addRecoveryEmail } from '../../services/auth.service.js';
 import { signUpload } from '../../services/cloudinary.service.js';
 import { toMeDto } from '../../services/me.serializer.js';
 import { invalidateAllFeedCaches, listUserPosts } from '../../services/post.service.js';
@@ -73,6 +76,13 @@ usersRouter.patch('/users/me/avatar', validateBody(setAvatarSchema), async (req,
     });
   }
   const updated = await users.updateUser(req.auth!.sub, { avatarUrl });
+  res.json({ user: toMeDto(updated) });
+});
+
+/** Adds a recovery email for an account that skipped it at signup. */
+usersRouter.patch('/users/me/email', validateBody(addRecoveryEmailSchema), async (req, res) => {
+  const { email } = req.body as AddRecoveryEmailBody;
+  const updated = await addRecoveryEmail(req.auth!.sub, email);
   res.json({ user: toMeDto(updated) });
 });
 

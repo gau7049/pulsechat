@@ -71,19 +71,73 @@ function ChangePasswordForm() {
   );
 }
 
+/** For an account that skipped the optional recovery email at signup. */
+function AddEmailForm({ onAdded }: { onAdded: (user: MeDto) => void }) {
+  const { toast } = useToast();
+  const [email, setEmail] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    setSaving(true);
+    try {
+      const { user: updated } = await patch<{ user: MeDto }>(
+        '/users/me/email',
+        { email: email.trim() },
+        { silent: true },
+      );
+      onAdded(updated);
+      toast('Recovery email added — check your inbox to verify it', { kind: 'success' });
+    } catch (err) {
+      setError(
+        err instanceof ApiError
+          ? (Object.values(err.details ?? {})[0]?.[0] ?? err.message)
+          : 'Could not add that email',
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-3">
+      <p className="text-sm text-fg-muted">
+        No recovery email on this account. Adding one enables password recovery, magic-link sign-in,
+        new-device protection, and two-factor login.
+      </p>
+      <div className="flex max-w-sm items-end gap-2">
+        <Input
+          label="Recovery email"
+          type="email"
+          autoComplete="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          hint="Gmail addresses only"
+          required
+        />
+        <Button type="submit" size="md" loading={saving}>
+          Add
+        </Button>
+      </div>
+      {error && (
+        <p role="alert" className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">
+          {error}
+        </p>
+      )}
+    </form>
+  );
+}
+
 function EmailBlock() {
-  const { user } = useAuth();
+  const { user, setUser } = useAuth();
   const { toast } = useToast();
   const [sending, setSending] = useState(false);
   if (!user) return null;
 
   if (!user.email) {
-    return (
-      <p className="text-sm text-fg-muted">
-        No recovery email on this account. Adding one enables password recovery, magic-link sign-in,
-        new-device protection, and two-factor login.
-      </p>
-    );
+    return <AddEmailForm onAdded={setUser} />;
   }
 
   return (

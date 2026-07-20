@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { displayNameSchema } from './auth.js';
+import { displayNameSchema, recoveryEmailSchema } from './auth.js';
 import { birthDateSchema } from './auth-requests.js';
 
 export const visibilityEnum = z.enum(['public', 'friends', 'private']);
@@ -23,6 +23,15 @@ export const updateProfileSchema = z
   .partial()
   .refine((value) => Object.keys(value).length > 0, { message: 'Nothing to update' });
 export type UpdateProfileBody = z.infer<typeof updateProfileSchema>;
+
+/**
+ * PATCH /users/me/email — for the account that skipped the optional
+ * recovery email at signup and wants to add one afterward. Changing an
+ * *existing* verified email is a separate, more sensitive flow (not yet
+ * built) and deliberately out of scope here.
+ */
+export const addRecoveryEmailSchema = z.object({ email: recoveryEmailSchema });
+export type AddRecoveryEmailBody = z.infer<typeof addRecoveryEmailSchema>;
 
 /** PATCH /users/me/privacy (Requirement Scope §8). */
 export const updatePrivacySchema = z
