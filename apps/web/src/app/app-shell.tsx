@@ -108,6 +108,14 @@ export function AppShell() {
                     Admin
                   </NavLink>
                 )}
+                <Link
+                  to="/people"
+                  aria-label="Search people"
+                  title="Search people"
+                  className="rounded-lg px-2 py-1.5 text-lg leading-none text-fg-muted transition-colors hover:text-fg"
+                >
+                  🔍
+                </Link>
                 <NotificationBell />
                 <Link
                   to="/settings"

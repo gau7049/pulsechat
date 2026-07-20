@@ -3,6 +3,7 @@ import type { TrendingMovieDto, TrendingSongDto } from '@pulsechat/shared';
 import { Modal } from '../../components/ui/modal';
 import { Skeleton } from '../../components/ui/skeleton';
 import { handleImageError } from '../../lib/image-fallback';
+import { registerPlayingAudio } from '../../lib/solo-audio';
 import { useTrendingMovies, useTrendingSongs } from './use-discover';
 
 /**
@@ -116,7 +117,13 @@ function SongRow({ song }: { song: TrendingSongDto }) {
       </div>
       {song.previewUrl && (
         // §24.3 — inline preview playback where the source API provides a clip.
-        <audio src={song.previewUrl} controls preload="none" className="h-8 w-40" />
+        <audio
+          src={song.previewUrl}
+          controls
+          preload="none"
+          onPlay={registerPlayingAudio}
+          className="h-8 w-40"
+        />
       )}
     </div>
   );

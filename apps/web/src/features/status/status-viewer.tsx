@@ -9,6 +9,7 @@ import { Avatar } from '../../components/ui/avatar';
 import { Button } from '../../components/ui/button';
 import { useToast } from '../../components/ui/toast';
 import { handleImageError } from '../../lib/image-fallback';
+import { registerPlayingAudio } from '../../lib/solo-audio';
 import { useAuth } from '../auth/auth-context';
 import { generateContentKey, wrapKeyFor } from '../../lib/crypto/conversation-keys';
 import { serializeEnvelope } from '../chat/message-envelope';
@@ -114,7 +115,7 @@ export function StatusViewer({
       aria-label={`${person.user.displayName}'s status`}
       className="fixed inset-0 z-50 flex flex-col bg-black text-white"
     >
-      <audio ref={audioRef} hidden />
+      <audio ref={audioRef} hidden onPlay={registerPlayingAudio} />
       <div className="flex gap-1 px-3 pt-3">
         {statuses.map((s, i) => (
           <div key={s.id} className="h-1 flex-1 overflow-hidden rounded-full bg-white/30">

@@ -7,6 +7,7 @@ import { Skeleton } from '../../components/ui/skeleton';
 import { useToast } from '../../components/ui/toast';
 import { ApiError } from '../../lib/api';
 import { handleImageError } from '../../lib/image-fallback';
+import { registerPlayingAudio } from '../../lib/solo-audio';
 import { ReportModal } from '../reports/report-modal';
 import { UserCard } from '../social/user-card';
 import { ackEmitter, getAckVersion, liveAggregate } from './chat-live-store';
@@ -340,7 +341,14 @@ function BubbleContent({
         </video>
       );
     case 'audio':
-      return <audio src={envelope.attachment.url} controls className="max-w-full" />;
+      return (
+        <audio
+          src={envelope.attachment.url}
+          controls
+          onPlay={registerPlayingAudio}
+          className="max-w-full"
+        />
+      );
     case 'document':
       return (
         <a
