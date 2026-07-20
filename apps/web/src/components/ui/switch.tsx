@@ -5,16 +5,20 @@ export function Switch({
   label,
   description,
   disabled,
+  busy,
 }: {
   checked: boolean;
   onChange: (next: boolean) => void;
   label: string;
   description?: string;
   disabled?: boolean;
+  /** Shows a spinner on the thumb instead of just dimming — use while an
+   * onChange side effect (e.g. a network call) is still in flight. */
+  busy?: boolean;
 }) {
   return (
     <label
-      className={`flex items-center justify-between gap-4 py-2 ${disabled ? 'opacity-50' : ''}`}
+      className={`flex items-center justify-between gap-4 py-2 ${disabled && !busy ? 'opacity-50' : ''}`}
     >
       <span>
         <span className="block text-sm font-semibold text-fg">{label}</span>
@@ -24,6 +28,7 @@ export function Switch({
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-busy={busy}
         aria-label={label}
         disabled={disabled}
         onClick={() => onChange(!checked)}
@@ -33,10 +38,14 @@ export function Switch({
       >
         <span
           aria-hidden
-          className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform ${
-            checked ? 'translate-x-5.5' : 'translate-x-0.5'
+          className={`absolute top-0.5 flex size-5 items-center justify-center rounded-full bg-white shadow transition-transform ${
+            checked ? 'translate-x-[22px]' : 'translate-x-0.5'
           }`}
-        />
+        >
+          {busy && (
+            <span className="size-3 animate-spin rounded-full border-2 border-fg-muted/30 border-t-accent" />
+          )}
+        </span>
       </button>
     </label>
   );

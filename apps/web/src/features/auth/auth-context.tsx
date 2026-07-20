@@ -21,6 +21,7 @@ import { getDeviceFingerprint } from '../../lib/fingerprint';
 import { generateKeypair, unlockPrivateKey } from '../../lib/crypto/keys';
 import { clearSessionKey, saveSessionKey } from '../../lib/crypto/key-session';
 import { connectSocket, disconnectSocket } from '../../lib/socket';
+import { notifyKeyChange } from '../chat/chat-keys';
 
 export type LoginResult =
   | { kind: 'session' }
@@ -75,9 +76,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     pendingPassword.current = null;
     if (password) {
       // Best-effort: a device without the stored keypair stays locked and the
-      // chat UI explains it (§6 trade-off).
+      // chat UI explains it (§6 trade-off). notifyKeyChange() re-checks status
+      // in any already-mounted useKeyStatus consumer — without it, a chat list
+      // that mounted before this async unlock finished would stay stuck on
+      // the "locked" panel until manually retried, even once the key is ready.
       void unlockPrivateKey(result.user.id, password).then((privateKey) => {
-        if (privateKey) void saveSessionKey(result.user.id, privateKey);
+        if (privateKey) {
+          void saveSessionKey(result.user.id, privateKey).then(notifyKeyChange);
+        }
       });
     }
   }, []);

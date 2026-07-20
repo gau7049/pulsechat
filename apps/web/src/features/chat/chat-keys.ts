@@ -37,7 +37,8 @@ export type KeyStatus = 'checking' | 'ready' | 'locked' | 'missing';
 
 const listeners = new Set<() => void>();
 
-function notifyKeyChange(): void {
+/** Re-checks key status in every mounted `useKeyStatus` consumer. */
+export function notifyKeyChange(): void {
   for (const listener of listeners) listener();
 }
 

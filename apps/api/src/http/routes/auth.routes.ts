@@ -3,6 +3,7 @@ import {
   changePasswordSchema,
   emailTokenSchema,
   forgotPasswordSchema,
+  LIMITS,
   loginBodySchema,
   magicLinkRequestSchema,
   otpVerifySchema,
@@ -36,16 +37,22 @@ import { validateBody } from '../middleware/validate.js';
 export const authRouter: Router = Router();
 
 const REFRESH_COOKIE = 'pc_refresh';
-const REFRESH_COOKIE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const REFRESH_COOKIE_MAX_AGE_MS = LIMITS.REMEMBER_ME_REFRESH_DAYS * 24 * 60 * 60 * 1000;
+const SESSION_ONLY_COOKIE_MAX_AGE_MS = LIMITS.SESSION_ONLY_REFRESH_HOURS * 60 * 60 * 1000;
 
 function requestContext(req: Request): auth.RequestContext {
   return { ip: req.ip ?? 'unknown', userAgent: req.headers['user-agent'] ?? 'unknown' };
 }
 
 /**
- * §6.2 remember me: a 30-day cookie when the caller opted in, otherwise a
- * true browser-session cookie (no `maxAge` — dropped on browser close). The
- * server-side token has its own, independently-checked expiry either way.
+ * §6.2 remember me: a 30-day cookie when the caller opted in, otherwise an
+ * explicit maxAge matching the refresh token's own shorter server-side expiry
+ * (`computeRefreshExpiry` in auth.service.ts). Deliberately NOT an
+ * `Expires`-less "session cookie" — installed Android PWAs frequently purge
+ * those on app close (separate task/WebAPK teardown), logging the user out
+ * every relaunch even though the underlying token was still valid. An
+ * explicit short maxAge gives the same "must re-auth without remember me"
+ * guarantee while surviving that close/reopen cycle.
  */
 function setRefreshCookie(res: Response, token: string, rememberMe: boolean): void {
   res.cookie(REFRESH_COOKIE, token, {
@@ -53,7 +60,7 @@ function setRefreshCookie(res: Response, token: string, rememberMe: boolean): vo
     secure: env.NODE_ENV === 'production',
     sameSite: 'strict',
     path: '/auth',
-    ...(rememberMe ? { maxAge: REFRESH_COOKIE_MAX_AGE_MS } : {}),
+    maxAge: rememberMe ? REFRESH_COOKIE_MAX_AGE_MS : SESSION_ONLY_COOKIE_MAX_AGE_MS,
   });
 }
 

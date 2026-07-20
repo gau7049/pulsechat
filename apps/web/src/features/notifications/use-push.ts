@@ -33,10 +33,20 @@ export function usePush() {
     setBusy(true);
     try {
       const reg = await navigator.serviceWorker.register('/sw.js');
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as BufferSource,
-      });
+      let sub: PushSubscription;
+      try {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as BufferSource,
+        });
+      } catch (err) {
+        if (Notification.permission === 'denied') {
+          throw new Error(
+            'Notifications are blocked for this site — enable them in your browser/app settings, then try again.',
+          );
+        }
+        throw err;
+      }
       await subscribe.mutateAsync(sub.toJSON() as PushSubscriptionJSON);
       setEnabled(true);
     } finally {

@@ -19,9 +19,12 @@ export function NotificationsSection() {
             description="Friend requests, likes, comments, moderation notices, and new messages while you're away"
             checked={push.enabled}
             disabled={push.busy}
+            busy={push.busy}
             onChange={(value) => {
-              void (value ? push.enable() : push.disable()).catch(() =>
-                toast('Could not update push notifications', { kind: 'error' }),
+              void (value ? push.enable() : push.disable()).catch((err) =>
+                toast(err instanceof Error ? err.message : 'Could not update push notifications', {
+                  kind: 'error',
+                }),
               );
             }}
           />
